@@ -1,0 +1,116 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Cable curving up from keyboard -->
+    <path
+        android:pathData="M 46,45 C 44,34 52,24 64,24 C 74,24 82,28 86,34"
+        android:strokeColor="#22D3EE"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- USB Connector at the end of cable -->
+    <path
+        android:pathData="M 85,33 L 90,38 L 94,34 L 89,29 Z"
+        android:fillColor="#38BDF8" />
+    <path
+        android:pathData="M 90,38 L 94,42 L 97,39 L 93,35 Z"
+        android:fillColor="#94A3B8" />
+
+    <!-- Bluetooth Badge in the middle of the keyboard cable (centered at x=64, y=24) -->
+    <path
+        android:pathData="M 64,15 A 9,9 0 1,1 63.99,15 Z"
+        android:fillColor="#09090B"
+        android:strokeColor="#22D3EE"
+        android:strokeWidth="2" />
+    <path
+        android:pathData="M 64,17 L 64,31 M 64,18 L 68,21.5 L 64,24.5 L 68,27.5 L 64,30.5 M 61,20.5 L 67,25 M 61,28.5 L 67,24"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Tilted Keyboard Chassis (tilted ~14 degrees) -->
+    <group
+        android:rotation="-14"
+        android:pivotX="54"
+        android:pivotY="66">
+
+        <!-- Keyboard outer casing -->
+        <path
+            android:pathData="M 24,52 C 24,48 27,45 31,45 L 77,45 C 81,45 84,48 84,52 L 84,84 C 84,88 81,91 77,91 L 31,91 C 27,91 24,88 24,84 Z"
+            android:fillColor="#18181B"
+            android:strokeColor="#0EA5E9"
+            android:strokeWidth="2" />
+
+        <!-- Top indicator border -->
+        <path
+            android:pathData="M 28,49 L 80,49"
+            android:strokeColor="#334155"
+            android:strokeWidth="1.5"
+            android:strokeLineCap="round" />
+
+        <!-- Row 1 Keys -->
+        <path
+            android:pathData="M 29,54 L 38,54 L 38,60 L 29,60 Z"
+            android:fillColor="#22D3EE" />
+        <path
+            android:pathData="M 41,54 L 49,54 L 49,60 L 41,60 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 52,54 L 60,54 L 60,60 L 52,60 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 63,54 L 71,54 L 71,60 L 63,60 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 74,54 L 79,54 L 79,60 L 74,60 Z"
+            android:fillColor="#38BDF8" />
+
+        <!-- Row 2 Keys -->
+        <path
+            android:pathData="M 29,63 L 36,63 L 36,69 L 29,69 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 39,63 L 47,63 L 47,69 L 39,69 Z"
+            android:fillColor="#34D399" />
+        <path
+            android:pathData="M 50,63 L 58,63 L 58,69 L 50,69 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 61,63 L 69,63 L 69,69 L 61,69 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 72,63 L 79,63 L 79,69 L 72,69 Z"
+            android:fillColor="#27272A" />
+
+        <!-- Row 3 Keys -->
+        <path
+            android:pathData="M 29,72 L 39,72 L 39,78 L 29,78 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 42,72 L 50,72 L 50,78 L 42,78 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 53,72 L 61,72 L 61,78 L 53,78 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 64,72 L 79,72 L 79,78 L 64,78 Z"
+            android:fillColor="#22D3EE" />
+
+        <!-- Bottom Row (Modifiers & Spacebar) -->
+        <path
+            android:pathData="M 29,81 L 36,81 L 36,87 L 29,87 Z"
+            android:fillColor="#27272A" />
+        <path
+            android:pathData="M 39,81 L 69,81 L 69,87 L 39,87 Z"
+            android:fillColor="#38BDF8" />
+        <path
+            android:pathData="M 72,81 L 79,81 L 79,87 L 72,87 Z"
+            android:fillColor="#27272A" />
+    </group>
+</vector>

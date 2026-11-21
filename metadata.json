@@ -1,0 +1,6 @@
+{
+  "name": "HID Forwarder",
+  "description": "USB Keyboard to Bluetooth HID Relay forwarder for Kindle and devices",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

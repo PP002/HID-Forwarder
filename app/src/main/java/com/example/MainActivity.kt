@@ -1,0 +1,1842 @@
+package com.example
+
+import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.view.KeyEvent
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardHide
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import com.example.ui.theme.Amber500
+import com.example.ui.theme.Cyan400
+import com.example.ui.theme.Cyan300
+import com.example.ui.theme.Emerald500
+import com.example.ui.theme.Emerald400
+import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.OledBlack
+import com.example.ui.theme.OledBorder
+import com.example.ui.theme.OledSurface
+import com.example.ui.theme.OledSurfaceVariant
+import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate100
+import com.example.ui.theme.Slate200
+import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate700
+import com.example.ui.theme.Slate900
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+
+class MainActivity : ComponentActivity() {
+
+    companion object {
+        private var relayManagerInstance: RelayManager? = null
+        private var evgrabManagerInstance: EvgrabManager? = null
+        private var wacomManagerInstance: WacomUsbManager? = null
+    }
+
+    private lateinit var relayManager: RelayManager
+    private lateinit var evgrabManager: EvgrabManager
+    private lateinit var wacomManager: WacomUsbManager
+    @Volatile private var isMacInputFocused: Boolean = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        // Keep screen on to allow continuous relaying
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // Reuse existing managers across configuration changes
+        relayManager = relayManagerInstance ?: RelayManager(applicationContext).also {
+            relayManagerInstance = it
+        }
+
+        evgrabManager = evgrabManagerInstance ?: EvgrabManager(
+            applicationContext,
+            relayManager.keySender,
+            log = { msg, lvl -> relayManager.log(msg, lvl) },
+            logKey = { key, lvl, args -> relayManager.log(key, lvl, *args) }
+        ).also {
+            evgrabManagerInstance = it
+        }
+
+        wacomManager = wacomManagerInstance ?: WacomUsbManager(
+            applicationContext,
+            relayManager.penSender,
+            relayManager.keySender,
+            log = { msg, lvl -> relayManager.log(msg, lvl) },
+            logKey = { key, lvl, args -> relayManager.log(key, lvl, *args) }
+        ).also {
+            wacomManagerInstance = it
+        }
+
+        setContent {
+            MyApplicationTheme {
+                MainScreen(
+                    relayManager = relayManager,
+                    evgrabManager = evgrabManager,
+                    wacomManager = wacomManager,
+                    onMacInputFocusChanged = { focused -> isMacInputFocused = focused }
+                )
+            }
+        }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!isMacInputFocused &&
+            ::relayManager.isInitialized &&
+            relayManager.connectionState.value == HidState.CONNECTED &&
+            ::evgrabManager.isInitialized &&
+            evgrabManager.onForegroundHardwareKeyEvent(event)
+        ) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun hasBluetoothPermissions(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+        }
+        return true
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::wacomManager.isInitialized) {
+            wacomManager.refreshAttachedDevice()
+        }
+        if (hasBluetoothPermissions() && ::relayManager.isInitialized) {
+            HidRelayForegroundService.start(
+                applicationContext,
+                StringProvider.get(relayManager.activeLanguage).notifDefault
+            )
+            relayManager.ensureHidReady()
+            relayManager.syncForegroundNotification()
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus && ::evgrabManager.isInitialized) {
+            evgrabManager.clearForegroundKeys()
+        }
+    }
+
+    override fun onDestroy() {
+        // Do NOT destroy connection or processes on configuration change (e.g. rotation or USB plug/unplug)
+        if (!isChangingConfigurations && isFinishing) {
+            if (::evgrabManager.isInitialized) {
+                evgrabManager.stop()
+            }
+            if (::wacomManager.isInitialized) {
+                wacomManager.destroy()
+            }
+            HidRelayForegroundService.stop(applicationContext)
+            if (::relayManager.isInitialized) {
+                relayManager.cleanup()
+            }
+            evgrabManagerInstance = null
+            wacomManagerInstance = null
+            relayManagerInstance = null
+        }
+        super.onDestroy()
+    }
+}
+
+private fun hasAllBluetoothPermissions(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+    }
+    return true
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun MainScreen(
+    relayManager: RelayManager,
+    evgrabManager: EvgrabManager,
+    wacomManager: WacomUsbManager,
+    onMacInputFocusChanged: (Boolean) -> Unit = {}
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    var currentLanguage by remember { mutableStateOf(AppLanguage.AUTO) }
+    val strings = StringProvider.get(currentLanguage)
+
+    // Observe RelayManager state
+    val isHidRegistered by relayManager.isHidRegistered.collectAsState()
+    val connectionState by relayManager.connectionState.collectAsState()
+    val targetAddress by relayManager.targetAddress.collectAsState()
+    val connectedAddress by relayManager.connectedDeviceAddress.collectAsState()
+    val connectedName by relayManager.connectedDeviceName.collectAsState()
+    val isSocketListening by relayManager.isSocketListening.collectAsState()
+    val isClientConnected by relayManager.isClientConnected.collectAsState()
+    val reportIdMode by relayManager.reportIdMode.collectAsState()
+    val hidProfileMode by relayManager.hidProfileMode.collectAsState()
+    val logs by relayManager.logs.collectAsState()
+
+    // Observe EvgrabManager state
+    val evgrabState by evgrabManager.state.collectAsState()
+    val activeKeyboards by evgrabManager.activeKeyboards.collectAsState()
+
+    // Observe WacomUsbManager state
+    val wacomState by wacomManager.state.collectAsState()
+    val wacomModel by wacomManager.detectedModel.collectAsState()
+    val wacomOrientation by wacomManager.orientation.collectAsState()
+    val wacomPressureCurve by wacomManager.pressureCurve.collectAsState()
+    val wacomButtonMode by wacomManager.buttonMode.collectAsState()
+
+    var showBondedDialog by remember { mutableStateOf(false) }
+    var permissionsGranted by remember { mutableStateOf(false) }
+    var isConsoleExpanded by remember { mutableStateOf(true) }
+    var isWacomCardExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentLanguage) {
+        relayManager.activeLanguage = currentLanguage
+        relayManager.syncForegroundNotification()
+    }
+
+    // Bluetooth + notification permission launcher
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        val btOk = hasAllBluetoothPermissions(context)
+        permissionsGranted = btOk
+        if (btOk) {
+            HidRelayForegroundService.start(context.applicationContext, strings.notifDefault)
+            relayManager.ensureHidReady()
+            relayManager.syncForegroundNotification()
+            relayManager.startRelayServer(RelayManager.DEFAULT_PORT)
+        } else {
+            relayManager.log(LogKey.MISSING_BT_PERMISSIONS, LogLevel.WARN)
+        }
+    }
+
+    // Auto check permissions on launch
+    LaunchedEffect(Unit) {
+        val neededPermissions = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                neededPermissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
+                neededPermissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                neededPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        if (hasAllBluetoothPermissions(context)) {
+            permissionsGranted = true
+            HidRelayForegroundService.start(context.applicationContext, strings.notifDefault)
+            relayManager.ensureHidReady()
+            relayManager.syncForegroundNotification()
+            relayManager.startRelayServer(RelayManager.DEFAULT_PORT)
+        }
+
+        if (neededPermissions.isNotEmpty()) {
+            permissionLauncher.launch(neededPermissions.toTypedArray())
+        }
+    }
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(logs.size) {
+        if (logs.isNotEmpty()) {
+            listState.animateScrollToItem(logs.size - 1)
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = OledSurface,
+                drawerContentColor = Slate100,
+                modifier = Modifier
+                    .widthIn(max = 320.dp)
+                    .testTag("sidebar_drawer")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 20.dp)
+                ) {
+                    // Drawer Header with App Icon
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_app_logo_1794044765794),
+                            contentDescription = strings.appTitle,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .border(1.dp, Cyan400.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = strings.appTitle,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = strings.subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate400,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 8.dp))
+
+                    // Section 1: USB Keyboard Exclusive Grab (evgrab)
+                    Text(
+                        text = strings.sectionEvgrab,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = OledSurfaceVariant),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, OledBorder),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("drawer_key_forwarder_card")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = strings.evgrabTitle,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Slate100
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = when (evgrabState) {
+                                            EvgrabState.RUNNING -> {
+                                                val kbText = if (activeKeyboards.isNotEmpty()) {
+                                                    activeKeyboards.joinToString { it.name }
+                                                } else {
+                                                    strings.evgrabSearching
+                                                }
+                                                strings.evgrabRunningFmt.replace("%s", kbText)
+                                            }
+                                            EvgrabState.STOPPED_BY_HOTKEY -> strings.backgroundFwdHotkeyStopped
+                                            EvgrabState.STOPPED -> strings.backgroundFwdInactive
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = when (evgrabState) {
+                                            EvgrabState.RUNNING -> Emerald400
+                                            EvgrabState.STOPPED_BY_HOTKEY -> Amber500
+                                            EvgrabState.STOPPED -> Slate400
+                                        },
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                Switch(
+                                    checked = (evgrabState == EvgrabState.RUNNING),
+                                    onCheckedChange = { isChecked ->
+                                        if (isChecked) evgrabManager.start() else evgrabManager.stop()
+                                    },
+                                    modifier = Modifier.testTag("switch_drawer_key_forwarder")
+                                )
+                            }
+
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = strings.evgrabDesc,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate400,
+                                fontSize = 10.5.sp
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
+
+                    // Wacom USB OTG Digitizer Section
+                    Text(
+                        text = strings.sectionWacom,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = OledSurfaceVariant),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, OledBorder),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("drawer_wacom_card")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = strings.wacomTitle,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Slate100
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = wacomModel?.modelName ?: strings.wacomModelNone,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = when (wacomState) {
+                                            WacomState.ACTIVE -> Emerald400
+                                            WacomState.WAITING_FOR_DEVICE, WacomState.REQUESTING_PERMISSION -> Amber500
+                                            WacomState.STOPPED -> Slate400
+                                        },
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                Switch(
+                                    checked = (wacomState != WacomState.STOPPED),
+                                    onCheckedChange = { isChecked ->
+                                        if (isChecked) wacomManager.start() else wacomManager.stop()
+                                    },
+                                    modifier = Modifier.testTag("switch_drawer_wacom")
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = strings.wacomDesc,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate400,
+                                fontSize = 10.5.sp
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
+
+                    // Bluetooth HID Profile Mode Selector (Combo / Wacom Pen Only / Keyboard Only)
+                    Text(
+                        text = strings.sectionHidProfile,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        HidProfileMode.values().forEach { mode ->
+                            val isSelected = hidProfileMode == mode
+                            val label = when (mode) {
+                                HidProfileMode.COMBO -> strings.hidProfileCombo
+                                HidProfileMode.WACOM_PEN -> strings.hidProfileWacom
+                                HidProfileMode.KEYBOARD -> strings.hidProfileKeyboard
+                            }
+                            Surface(
+                                onClick = { relayManager.setHidProfileMode(mode) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) Cyan400.copy(alpha = 0.15f) else Color.Transparent,
+                                border = if (isSelected) BorderStroke(1.dp, Cyan400) else BorderStroke(1.dp, OledBorder),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("hid_profile_mode_${mode.name}")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isSelected) Cyan400 else Slate200,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = strings.cdSelected,
+                                            tint = Cyan400,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
+
+                    // HID Report ID Mode Selector
+                    Text(
+                        text = strings.sectionReportIdMode,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ReportIdMode.values().forEach { mode ->
+                            val isSelected = reportIdMode == mode
+                            val modeLabel = when (mode) {
+                                ReportIdMode.AUTO -> strings.reportIdAuto
+                                ReportIdMode.FORCE_1 -> strings.reportIdForce1
+                                ReportIdMode.FORCE_0 -> strings.reportIdForce0
+                            }
+                            Surface(
+                                onClick = { relayManager.setReportIdMode(mode) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) Cyan400.copy(alpha = 0.15f) else Color.Transparent,
+                                border = if (isSelected) BorderStroke(1.dp, Cyan400) else BorderStroke(1.dp, OledBorder),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("report_id_mode_${mode.name}")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = modeLabel,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isSelected) Cyan400 else Slate200,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = strings.cdSelected,
+                                            tint = Cyan400,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
+
+                    // Section 2: Multi-Language Selector
+                    Text(
+                        text = strings.sectionLanguage,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+
+                    val detectedLang = remember { AppLanguage.detectSystemLanguage() }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AppLanguage.values().forEach { lang ->
+                            val isSelected = currentLanguage == lang
+                            Surface(
+                                onClick = { currentLanguage = lang },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) Cyan400.copy(alpha = 0.15f) else Color.Transparent,
+                                border = if (isSelected) BorderStroke(1.dp, Cyan400) else null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("lang_option_${lang.name}")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = lang.displayName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (isSelected) Cyan400 else Slate200,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = if (lang == AppLanguage.AUTO) {
+                                                "${strings.autoDetectedLabel}: ${detectedLang.displayName}"
+                                            } else {
+                                                lang.subName
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (isSelected) Cyan400.copy(alpha = 0.8f) else Slate400,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = strings.cdSelected,
+                                            tint = Cyan400,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
+
+                    // Section 3: System Info / OLED Black
+                    Text(
+                        text = strings.sectionAbout,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Slate400,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                    Text(
+                        text = strings.appVersion,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Slate400,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        }
+    ) {
+        Scaffold(
+            containerColor = OledBlack,
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = strings.appTitle,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = strings.subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate400,
+                                fontSize = 11.sp
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = { scope.launch { drawerState.open() } },
+                            modifier = Modifier.testTag("btn_open_sidebar")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = strings.cdMenu,
+                                tint = Cyan400
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = OledBlack,
+                        titleContentColor = Color.White,
+                        actionIconContentColor = Slate200
+                    )
+                )
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(OledBlack)
+                    .padding(innerPadding)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Status Summary Chip Card
+                    StatusSummaryCard(
+                        strings = strings,
+                        isHidRegistered = isHidRegistered,
+                        connectionState = connectionState,
+                        connectedHost = connectedName ?: connectedAddress,
+                        isSocketListening = isSocketListening,
+                        isClientConnected = isClientConnected,
+                        packetsFlow = relayManager.packetsForwarded,
+                        evgrabState = evgrabState,
+                        activeKeyboards = activeKeyboards,
+                        wacomState = wacomState,
+                        wacomModel = wacomModel,
+                        onToggleEvgrab = {
+                            if (evgrabState == EvgrabState.RUNNING) evgrabManager.stop() else evgrabManager.start()
+                        },
+                        onToggleWacom = {
+                            if (wacomState == WacomState.STOPPED) wacomManager.start() else wacomManager.stop()
+                        }
+                    )
+
+                    // Target Device Bluetooth Connection Card
+                    TargetDeviceCard(
+                        strings = strings,
+                        targetAddress = targetAddress,
+                        connectionState = connectionState,
+                        onAddressChange = { relayManager.setTargetAddress(it) },
+                        onMacFocusChange = onMacInputFocusChanged,
+                        onMakeDiscoverable = { relayManager.makeDiscoverable() },
+                        onConnectTarget = { relayManager.pairOrConnectTarget(targetAddress) },
+                        onDisconnectTarget = { relayManager.disconnectTarget() },
+                        onChooseBonded = { showBondedDialog = true }
+                    )
+
+                    // Compact Collapsible USB OTG Wacom -> Bluetooth Pen Card
+                    WacomTabletCard(
+                        strings = strings,
+                        wacomState = wacomState,
+                        detectedModel = wacomModel,
+                        liveSampleFlow = wacomManager.liveSample,
+                        orientation = wacomOrientation,
+                        pressureCurve = wacomPressureCurve,
+                        buttonMode = wacomButtonMode,
+                        isExpanded = isWacomCardExpanded,
+                        onToggleExpand = { isWacomCardExpanded = !isWacomCardExpanded },
+                        onToggleStartStop = {
+                            if (wacomState == WacomState.STOPPED) wacomManager.start() else wacomManager.stop()
+                        },
+                        onSelectOrientation = { wacomManager.setOrientation(it) },
+                        onSelectPressureCurve = { wacomManager.setPressureCurve(it) },
+                        onSelectButtonMode = { wacomManager.setButtonMode(it) }
+                    )
+
+                    // Soft Keyboard Input Card (visible in Combo or Keyboard-only HID profile)
+                    if (hidProfileMode != HidProfileMode.WACOM_PEN) {
+                        SoftKeyboardInputCard(
+                            strings = strings,
+                            isConnected = (connectionState == HidState.CONNECTED),
+                            relayManager = relayManager
+                        )
+                    }
+
+                    // Real-time Terminal Log Console Card (Collapsible; expands to fill remaining bottom area)
+                    TerminalLogsCard(
+                        strings = strings,
+                        currentLanguage = currentLanguage,
+                        logs = logs,
+                        listState = listState,
+                        isExpanded = isConsoleExpanded,
+                        onToggleExpand = { isConsoleExpanded = !isConsoleExpanded },
+                        onClearLogs = { relayManager.clearLogs() },
+                        onCopyLogs = {
+                            val allLogs = logs.joinToString("\n") { "[${it.timestamp}] ${it.resolve(currentLanguage)}" }
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("HID Logs", allLogs))
+                            Toast.makeText(context, strings.logCopied, Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f, fill = isConsoleExpanded)
+                    )
+                }
+            }
+        }
+    }
+
+    // Dialog for choosing bonded device
+    if (showBondedDialog) {
+        val bondedDevices = remember { relayManager.getBondedDevices() }
+        AlertDialog(
+            onDismissRequest = { showBondedDialog = false },
+            containerColor = OledSurface,
+            title = {
+                Text(
+                    text = strings.bondedDialogTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            },
+            text = {
+                if (bondedDevices.isEmpty()) {
+                    Text(
+                        text = strings.noBondedDevices,
+                        color = Slate400,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.height(260.dp)
+                    ) {
+                        items(bondedDevices) { device ->
+                            val devName = try { device.name ?: "Unknown" } catch (_: Exception) { "Unknown" }
+                            Surface(
+                                onClick = {
+                                    relayManager.setTargetAddress(device.address)
+                                    showBondedDialog = false
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = OledSurfaceVariant,
+                                border = BorderStroke(1.dp, OledBorder),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("bonded_device_${device.address}")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = devName,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Slate100
+                                        )
+                                        Text(
+                                            text = device.address,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Slate400,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Link,
+                                        contentDescription = strings.cdSelectDevice,
+                                        tint = Cyan400
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBondedDialog = false }) {
+                    Text(strings.btnOk, color = Cyan400)
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun StatusSummaryCard(
+    strings: LocalizedStrings,
+    isHidRegistered: Boolean,
+    connectionState: HidState,
+    connectedHost: String?,
+    isSocketListening: Boolean,
+    isClientConnected: Boolean,
+    packetsFlow: StateFlow<Long>,
+    evgrabState: EvgrabState,
+    activeKeyboards: List<DiscoveredKeyboard>,
+    wacomState: WacomState,
+    wacomModel: WacomModelSpec?,
+    onToggleEvgrab: () -> Unit,
+    onToggleWacom: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("status_summary_card"),
+        colors = CardDefaults.cardColors(containerColor = OledSurface),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, OledBorder)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = strings.systemStatusTitle,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Cyan400
+                )
+                PacketCountText(packetsFlow = packetsFlow)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // HID Status Chip
+                AssistChip(
+                    onClick = {},
+                    label = {
+                        Text(if (isHidRegistered) strings.btHidReady else strings.btHidInit, color = Slate100)
+                    },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (isHidRegistered) Emerald500 else Amber500)
+                        )
+                    },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                    modifier = Modifier.testTag("chip_hid_status")
+                )
+
+                // Host Connection Status Chip
+                AssistChip(
+                    onClick = {},
+                    label = {
+                        val label = when (connectionState) {
+                            HidState.CONNECTED -> "${strings.deviceConnected}: ${connectedHost ?: ""}"
+                            HidState.CONNECTING -> strings.chipHostConnecting
+                            HidState.DISCONNECTING -> strings.chipHostDisconnecting
+                            HidState.DISCONNECTED -> strings.deviceDisconnected
+                        }
+                        Text(label, color = Slate100)
+                    },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (connectionState == HidState.CONNECTED) Emerald500 else Slate400)
+                        )
+                    },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                    modifier = Modifier.testTag("chip_connection_status")
+                )
+
+                // evgrab USB Grab Status Chip (clickable to toggle USB forwarding)
+                AssistChip(
+                    onClick = onToggleEvgrab,
+                    label = {
+                        val text = when (evgrabState) {
+                            EvgrabState.RUNNING -> strings.chipEvgrabRunningFmt.replace("%d", activeKeyboards.size.toString())
+                            EvgrabState.STOPPED_BY_HOTKEY -> strings.chipEvgrabHotkeyStopped
+                            EvgrabState.STOPPED -> strings.chipEvgrabForeground
+                        }
+                        Text(text, color = Slate100)
+                    },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when (evgrabState) {
+                                        EvgrabState.RUNNING -> Emerald500
+                                        EvgrabState.STOPPED_BY_HOTKEY -> Amber500
+                                        EvgrabState.STOPPED -> Cyan400
+                                    }
+                                )
+                        )
+                    },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                    modifier = Modifier.testTag("chip_fwd_mode")
+                )
+
+                // Wacom OTG Pen Status Chip (clickable to toggle Wacom forwarding)
+                AssistChip(
+                    onClick = onToggleWacom,
+                    label = {
+                        val shortModel = wacomModel?.modelName?.substringBefore(" (") ?: "Wacom"
+                        val text = when (wacomState) {
+                            WacomState.ACTIVE -> strings.wacomActiveChipFmt.replace("%s", shortModel)
+                            WacomState.WAITING_FOR_DEVICE -> strings.wacomWaitingChip
+                            WacomState.REQUESTING_PERMISSION -> strings.wacomPermChip
+                            WacomState.STOPPED -> strings.wacomStoppedChip
+                        }
+                        Text(text, color = Slate100)
+                    },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when (wacomState) {
+                                        WacomState.ACTIVE -> Emerald500
+                                        WacomState.WAITING_FOR_DEVICE, WacomState.REQUESTING_PERMISSION -> Amber500
+                                        WacomState.STOPPED -> Slate400
+                                    }
+                                )
+                        )
+                    },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                    modifier = Modifier.testTag("chip_wacom_status")
+                )
+
+                // Socket Relay Status Chip
+                AssistChip(
+                    onClick = {},
+                    label = {
+                        Text(
+                            if (isClientConnected) strings.socketClientConnected
+                            else if (isSocketListening) strings.socketListening
+                            else strings.socketInactive,
+                            color = Slate100
+                        )
+                    },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (isClientConnected) Emerald500 else if (isSocketListening) Cyan400 else Rose500)
+                        )
+                    },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                    modifier = Modifier.testTag("chip_socket_status")
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PacketCountText(packetsFlow: StateFlow<Long>) {
+    val packetsForwarded by packetsFlow.collectAsState()
+    Text(
+        text = "# $packetsForwarded",
+        style = MaterialTheme.typography.bodySmall,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        color = Slate200
+    )
+}
+
+@Composable
+fun TargetDeviceCard(
+    strings: LocalizedStrings,
+    targetAddress: String,
+    connectionState: HidState,
+    onAddressChange: (String) -> Unit,
+    onMacFocusChange: (Boolean) -> Unit,
+    onMakeDiscoverable: () -> Unit,
+    onConnectTarget: () -> Unit,
+    onDisconnectTarget: () -> Unit,
+    onChooseBonded: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("target_device_card"),
+        colors = CardDefaults.cardColors(containerColor = OledSurface),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, OledBorder)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = strings.targetDeviceCardTitle,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = Slate100
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            OutlinedTextField(
+                value = targetAddress,
+                onValueChange = onAddressChange,
+                label = { Text(strings.macAddressLabel) },
+                placeholder = { Text(strings.macAddressPlaceholder) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Cyan400,
+                    unfocusedBorderColor = OledBorder,
+                    focusedLabelColor = Cyan400,
+                    unfocusedLabelColor = Slate400,
+                    focusedTextColor = Slate100,
+                    unfocusedTextColor = Slate100
+                ),
+                trailingIcon = {
+                    if (targetAddress.isNotEmpty()) {
+                        IconButton(onClick = { onAddressChange("") }) {
+                            Icon(Icons.Default.Clear, contentDescription = strings.cdClearMac, tint = Slate400)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { onMacFocusChange(it.isFocused) }
+                    .testTag("mac_address_input")
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Action Buttons
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onMakeDiscoverable,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan400),
+                        border = BorderStroke(1.dp, OledBorder),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("discoverable_button")
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.BluetoothSearching, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(strings.btnMakeDiscoverable, maxLines = 1)
+                    }
+
+                    OutlinedButton(
+                        onClick = onChooseBonded,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Slate200),
+                        border = BorderStroke(1.dp, OledBorder),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("choose_bonded_button")
+                    ) {
+                        Icon(Icons.Default.Devices, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(strings.btnBondedList, maxLines = 1)
+                    }
+                }
+
+                if (connectionState == HidState.CONNECTED) {
+                    Button(
+                        onClick = onDisconnectTarget,
+                        colors = ButtonDefaults.buttonColors(containerColor = Rose500),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("disconnect_button")
+                    ) {
+                        Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(strings.btnDisconnect)
+                    }
+                } else {
+                    Button(
+                        onClick = onConnectTarget,
+                        colors = ButtonDefaults.buttonColors(containerColor = Cyan400, contentColor = Color.Black),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("connect_target_button")
+                    ) {
+                        Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(strings.btnPairConnect, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Soft keyboard live relay (QWERTY Termux-style input).
+ * Intercepts sendKeyEvent and commitText via HidTextInputView and queues serialized HID reports.
+ */
+@Composable
+fun SoftKeyboardInputCard(
+    strings: LocalizedStrings,
+    isConnected: Boolean,
+    relayManager: RelayManager
+) {
+    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    val isSystemImeVisible = WindowInsets.ime.getBottom(density) > 0
+    var hidTextInputView by remember { mutableStateOf<HidTextInputView?>(null) }
+    var isImeActive by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isSystemImeVisible) {
+        if (!isSystemImeVisible && isImeActive) {
+            isImeActive = false
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("soft_keyboard_input_card"),
+        colors = CardDefaults.cardColors(containerColor = OledSurface),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, OledBorder)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Keyboard,
+                        contentDescription = null,
+                        tint = Cyan400,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = strings.softKeyboardCardTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate100
+                    )
+                }
+                if (!isConnected) {
+                    Text(
+                        text = strings.needConnectFirst,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Amber500
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Embedded HidTextInputView in a fixed-height container to avoid layout recalculations stealing IME focus
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(24.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(OledBlack)
+                    .border(
+                        width = 1.dp,
+                        color = if (isImeActive) Emerald500.copy(alpha = 0.7f) else OledBorder,
+                        shape = RoundedCornerShape(6.dp)
+                    )
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        HidTextInputView(
+                            ctx,
+                            relayManager.keySender,
+                            log = { msg, lvl -> relayManager.log(msg, lvl) },
+                            logKey = { key, lvl, args -> relayManager.log(key, lvl, *args) }
+                        ).apply {
+                            setOnClickListener { v ->
+                                focusManager.clearFocus(force = true)
+                                v.requestFocusFromTouch()
+                                v.requestFocus()
+                                val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                                imm?.restartInput(v)
+                                imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                                isImeActive = true
+                            }
+                        }.also {
+                            hidTextInputView = it
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Show / Hide soft keyboard toggle button
+            Button(
+                onClick = {
+                    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                    if (isImeActive && isSystemImeVisible) {
+                        hidTextInputView?.let { v ->
+                            imm?.hideSoftInputFromWindow(v.windowToken, 0)
+                        }
+                        isImeActive = false
+                    } else {
+                        focusManager.clearFocus(force = true)
+                        hidTextInputView?.let { v ->
+                            v.isFocusable = true
+                            v.isFocusableInTouchMode = true
+                            v.requestFocusFromTouch()
+                            v.requestFocus()
+                            v.post {
+                                v.requestFocusFromTouch()
+                                v.requestFocus()
+                                imm?.restartInput(v)
+                                val shown = imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT) ?: false
+                                if (!shown) {
+                                    imm?.showSoftInput(v, 0)
+                                }
+                                relayManager.log(
+                                    LogKey.IME_TOGGLE_FOCUS_STATUS,
+                                    LogLevel.INFO,
+                                    v.hasFocus(),
+                                    shown || isSystemImeVisible
+                                )
+                            }
+                        }
+                        isImeActive = true
+                    }
+                },
+                enabled = isConnected,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isImeActive) Emerald500 else Cyan400,
+                    contentColor = Color.Black,
+                    disabledContainerColor = OledSurfaceVariant,
+                    disabledContentColor = Slate400
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .testTag("btn_toggle_soft_keyboard")
+            ) {
+                Icon(
+                    imageVector = if (isImeActive) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (isImeActive) strings.btnToggleImeHide else strings.btnToggleImeShow,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = strings.softKeyboardHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = Slate400,
+                fontSize = 11.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun TerminalLogsCard(
+    strings: LocalizedStrings,
+    currentLanguage: AppLanguage,
+    logs: List<LogEntry>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onClearLogs: () -> Unit,
+    onCopyLogs: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("terminal_logs_card"),
+        colors = CardDefaults.cardColors(containerColor = OledSurface),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, OledBorder)
+    ) {
+        Column(
+            modifier = Modifier
+                .then(if (isExpanded) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
+                .padding(12.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.testTag("btn_toggle_console")
+                ) {
+                    IconButton(
+                        onClick = onToggleExpand,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = strings.cdToggleExpand,
+                            tint = Cyan400
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Default.Terminal,
+                        contentDescription = null,
+                        tint = Slate200,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = strings.terminalLogsTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate100
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(
+                        onClick = onClearLogs,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .testTag("btn_clear_logs")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = strings.btnClear,
+                            tint = Slate400,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onCopyLogs,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .testTag("btn_copy_logs")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = strings.btnCopy,
+                            tint = Cyan400,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = isExpanded,
+                modifier = if (isExpanded) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Surface(
+                        color = OledBlack,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, OledBorder),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        if (logs.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = strings.noLogsYet,
+                                    color = Slate400,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(8.dp)
+                                    .testTag("logs_lazy_list")
+                            ) {
+                                items(logs) { entry ->
+                                    val textColor = when (entry.level) {
+                                        LogLevel.INFO -> Slate200
+                                        LogLevel.SUCCESS -> Emerald400
+                                        LogLevel.WARN -> Amber500
+                                        LogLevel.ERROR -> Rose500
+                                    }
+
+                                    Row(modifier = Modifier.padding(vertical = 1.dp)) {
+                                        Text(
+                                            text = "[${entry.timestamp}] ",
+                                            color = Slate400,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Text(
+                                            text = entry.resolve(currentLanguage),
+                                            color = textColor,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun WacomTabletCard(
+    strings: LocalizedStrings,
+    wacomState: WacomState,
+    detectedModel: WacomModelSpec?,
+    liveSampleFlow: StateFlow<WacomPenSample?>,
+    orientation: WacomOrientation,
+    pressureCurve: WacomPressureCurve,
+    buttonMode: WacomButtonMode,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onToggleStartStop: () -> Unit,
+    onSelectOrientation: (WacomOrientation) -> Unit,
+    onSelectPressureCurve: (WacomPressureCurve) -> Unit,
+    onSelectButtonMode: (WacomButtonMode) -> Unit
+) {
+    val isRunning = wacomState != WacomState.STOPPED
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("wacom_tablet_card"),
+        colors = CardDefaults.cardColors(containerColor = OledSurface),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, if (wacomState == WacomState.ACTIVE) Emerald500.copy(alpha = 0.6f) else OledBorder)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Draw,
+                        contentDescription = null,
+                        tint = if (wacomState == WacomState.ACTIVE) Emerald400 else Cyan400,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = strings.wacomTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate100
+                        )
+                        WacomTelemetryText(
+                            strings = strings,
+                            wacomState = wacomState,
+                            detectedModel = detectedModel,
+                            liveSampleFlow = liveSampleFlow
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(6.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = onToggleStartStop,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isRunning) Rose500 else Cyan400,
+                            contentColor = if (isRunning) Color.White else Color.Black
+                        ),
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("btn_toggle_wacom")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Usb,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (isRunning) strings.wacomBtnStop else strings.wacomBtnStart,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onToggleExpand,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("btn_expand_wacom")
+                    ) {
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = strings.cdToggleExpand,
+                            tint = Cyan400
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.padding(top = 10.dp)) {
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(bottom = 8.dp))
+
+                    // Orientation selector
+                    Text(
+                        text = strings.wacomOrientationLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        WacomOrientation.values().forEach { orient ->
+                            val label = when (orient) {
+                                WacomOrientation.LANDSCAPE_0 -> strings.orientLandscape0
+                                WacomOrientation.PORTRAIT_270_USB_TOP -> strings.orientPortrait270
+                                WacomOrientation.PORTRAIT_90 -> strings.orientPortrait90
+                                WacomOrientation.LANDSCAPE_180 -> strings.orientLandscape180
+                            }
+                            FilterChip(
+                                selected = orientation == orient,
+                                onClick = { onSelectOrientation(orient) },
+                                label = { Text(label, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Cyan400.copy(alpha = 0.2f),
+                                    selectedLabelColor = Cyan300,
+                                    labelColor = Slate200
+                                ),
+                                modifier = Modifier.testTag("wacom_orient_${orient.name}")
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Pressure curve selector
+                    Text(
+                        text = strings.wacomPressureLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        WacomPressureCurve.values().forEach { curve ->
+                            val label = when (curve) {
+                                WacomPressureCurve.GAMMA_1_2 -> strings.pressureGamma12
+                                WacomPressureCurve.LINEAR_1_0 -> strings.pressureLinear
+                            }
+                            FilterChip(
+                                selected = pressureCurve == curve,
+                                onClick = { onSelectPressureCurve(curve) },
+                                label = { Text(label, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Cyan400.copy(alpha = 0.2f),
+                                    selectedLabelColor = Cyan300,
+                                    labelColor = Slate200
+                                ),
+                                modifier = Modifier.testTag("wacom_pressure_${curve.name}")
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Barrel button mode selector
+                    Text(
+                        text = strings.wacomButtonModeLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        WacomButtonMode.values().forEach { mode ->
+                            val label = when (mode) {
+                                WacomButtonMode.STYLUS_ONLY -> strings.btnModeStylusOnly
+                                WacomButtonMode.STYLUS_PLUS_SHORTCUTS -> strings.btnModeShortcuts
+                            }
+                            FilterChip(
+                                selected = buttonMode == mode,
+                                onClick = { onSelectButtonMode(mode) },
+                                label = { Text(label, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Cyan400.copy(alpha = 0.2f),
+                                    selectedLabelColor = Cyan300,
+                                    labelColor = Slate200
+                                ),
+                                modifier = Modifier.testTag("wacom_btn_mode_${mode.name}")
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WacomTelemetryText(
+    strings: LocalizedStrings,
+    wacomState: WacomState,
+    detectedModel: WacomModelSpec?,
+    liveSampleFlow: StateFlow<WacomPenSample?>
+) {
+    val liveSample by liveSampleFlow.collectAsState()
+    val showTelemetry = liveSample != null && wacomState == WacomState.ACTIVE
+    val subtitleText = if (showTelemetry) {
+        val sample = liveSample!!
+        val penState = when {
+            sample.tipSwitch -> strings.wacomStateTip
+            sample.inRange -> strings.wacomStateHover
+            else -> strings.wacomStateIdle
+        }
+        String.format(
+            strings.wacomLiveTelemetryFmt,
+            penState,
+            sample.hidX,
+            sample.hidY,
+            sample.hidPressure
+        )
+    } else {
+        detectedModel?.modelName ?: strings.wacomModelNone
+    }
+    Text(
+        text = subtitleText,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (wacomState == WacomState.ACTIVE) Emerald400 else Slate400,
+        fontFamily = if (showTelemetry) FontFamily.Monospace else FontFamily.Default,
+        fontSize = 11.sp,
+        maxLines = 1
+    )
+}
