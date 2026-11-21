@@ -1,6 +1,6 @@
 {
   "name": "HID Forwarder",
-  "description": "USB Keyboard to Bluetooth HID Relay forwarder for Kindle and devices",
+  "description": "USB OTG input devices (keyboard, mouse, Wacom tablet) to Bluetooth HID relay forwarder",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

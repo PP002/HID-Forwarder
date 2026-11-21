@@ -42,6 +42,9 @@ class HidRelayForegroundService : Service() {
         @Volatile
         private var isWacomRunning = false
 
+        @Volatile
+        private var isMouseRunning = false
+
         fun hasRequiredPermissions(context: Context): Boolean {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 if (ContextCompat.checkSelfPermission(
@@ -92,10 +95,17 @@ class HidRelayForegroundService : Service() {
             syncWakeLock(context)
         }
 
+        fun setMouseRunning(context: Context, running: Boolean) {
+            isMouseRunning = running
+            syncWakeLock(context)
+        }
+
         private fun syncWakeLock(context: Context) {
             val instance = activeInstance
             if (instance != null && isServiceRunning) {
-                instance.updateCpuWakeLock(shouldHold = isHidConnected || isEvgrabRunning || isWacomRunning)
+                instance.updateCpuWakeLock(
+                    shouldHold = isHidConnected || isEvgrabRunning || isWacomRunning || isMouseRunning
+                )
                 return
             }
             if (!isServiceRunning) return
@@ -114,6 +124,7 @@ class HidRelayForegroundService : Service() {
             isHidConnected = false
             isEvgrabRunning = false
             isWacomRunning = false
+            isMouseRunning = false
             isServiceRunning = false
             activeInstance?.releaseWakeLock()
             try {
@@ -170,7 +181,7 @@ class HidRelayForegroundService : Service() {
             }
         }
 
-        updateCpuWakeLock(shouldHold = isHidConnected || isEvgrabRunning || isWacomRunning)
+        updateCpuWakeLock(shouldHold = isHidConnected || isEvgrabRunning || isWacomRunning || isMouseRunning)
         return START_STICKY
     }
 

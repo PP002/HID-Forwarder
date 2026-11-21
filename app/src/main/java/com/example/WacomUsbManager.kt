@@ -135,11 +135,16 @@ class WacomUsbManager(
                         if (device.deviceId == activeDeviceId) {
                             emitLog(LogKey.WACOM_DEVICE_DETACHED, LogLevel.WARN)
                             stopReaderOnly()
-                            _detectedModel.value = findAttachedWacomDevice()?.let {
+                            val nextDev = findAttachedWacomDevice()
+                            _detectedModel.value = nextDev?.let {
                                 WacomProtocol.resolveModel(it.vendorId, it.productId, it.productName)
                             }
                             if (desiredRunning) {
-                                _state.value = WacomState.WAITING_FOR_DEVICE
+                                if (nextDev != null) {
+                                    connectOrRequestPermission(nextDev)
+                                } else {
+                                    _state.value = WacomState.WAITING_FOR_DEVICE
+                                }
                             }
                         }
                     }
@@ -184,6 +189,9 @@ class WacomUsbManager(
         val dev = findAttachedWacomDevice()
         val spec = dev?.let { WacomProtocol.resolveModel(it.vendorId, it.productId, it.productName) }
         _detectedModel.value = spec
+        if (desiredRunning && dev != null && activeDeviceId == -1) {
+            connectOrRequestPermission(dev)
+        }
         return spec
     }
 
@@ -243,7 +251,12 @@ class WacomUsbManager(
             val permIntent = Intent(ACTION_USB_PERMISSION).setPackage(context.packageName)
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
-            val pending = PendingIntent.getBroadcast(context, 0, permIntent, flags)
+            val pending = PendingIntent.getBroadcast(
+                context,
+                10000 + (device.deviceId and 0x3FFF),
+                permIntent,
+                flags
+            )
             mgr.requestPermission(device, pending)
         }
     }

@@ -28,33 +28,61 @@ data class DiscoveredKeyboard(
     val eventNode: String // e.g. "/dev/input/event5"
 )
 
+data class DiscoveredMouse(
+    val name: String,
+    val eventNode: String // e.g. "/dev/input/event7"
+)
+
 class EvgrabManager(
     private val context: Context,
     private val keySender: HidKeySender,
+    private val mouseSender: HidMouseSender?,
     private val log: (String, LogLevel) -> Unit,
     private val logKey: ((LogKey, LogLevel, Array<out Any>) -> Unit)?
 ) {
     constructor(
         context: Context,
         keySender: HidKeySender,
+        log: (String, LogLevel) -> Unit,
+        logKey: ((LogKey, LogLevel, Array<out Any>) -> Unit)?
+    ) : this(context, keySender, null, log, logKey)
+
+    constructor(
+        context: Context,
+        keySender: HidKeySender,
         log: (String, LogLevel) -> Unit
-    ) : this(context, keySender, log, null)
+    ) : this(context, keySender, null, log, null)
+
+    private data class RunningGrabProcess(
+        val eventNode: String,
+        val isMouse: Boolean,
+        val job: Job,
+        @Volatile var process: Process? = null
+    )
+
+    private class FgKeyState {
+        var modifiers: Byte = 0
+        val pressedKeys = LinkedHashSet<Byte>()
+    }
+
     private val scope = CoroutineScope(Dispatchers.IO)
     private var managerJob: Job? = null
-    private val activeProcesses = mutableListOf<Process>()
-    private val processLock = Any()
+    private val runningGrabs = java.util.concurrent.ConcurrentHashMap<String, RunningGrabProcess>()
+    private val rescanSignal = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    // Foreground fallback state (used when evgrab is stopped or libevgrab.so is missing)
-    private var fgModifiers: Byte = 0
-    private val fgPressedKeys = LinkedHashSet<Byte>()
+    // Foreground fallback state per hardware deviceId (used when evgrab is STOPPED)
+    private val fgDeviceStates = HashMap<Int, FgKeyState>()
     private val fgLock = Any()
-    @Volatile private var fgModeLogged = false
+    private val loggedFgDeviceIds = HashSet<Int>()
 
     private val _state = MutableStateFlow(EvgrabState.STOPPED)
     val state: StateFlow<EvgrabState> = _state.asStateFlow()
 
     private val _activeKeyboards = MutableStateFlow<List<DiscoveredKeyboard>>(emptyList())
     val activeKeyboards: StateFlow<List<DiscoveredKeyboard>> = _activeKeyboards.asStateFlow()
+
+    private val _activeEvMice = MutableStateFlow<List<DiscoveredMouse>>(emptyList())
+    val activeEvMice: StateFlow<List<DiscoveredMouse>> = _activeEvMice.asStateFlow()
 
     private fun emitLog(key: LogKey, level: LogLevel, vararg args: Any) {
         val lk = logKey
@@ -65,6 +93,10 @@ class EvgrabManager(
         }
     }
 
+    fun kickRescan() {
+        rescanSignal.set(true)
+    }
+
     fun start() {
         stop(silent = true)
         clearForegroundKeys()
@@ -73,145 +105,246 @@ class EvgrabManager(
         emitLog(LogKey.EVGRAB_STARTING, LogLevel.INFO)
 
         managerJob = scope.launch {
-            while (isActive && _state.value == EvgrabState.RUNNING) {
-                val libPath = resolveEvgrabBinaryPath()
-                if (libPath == null) {
-                    emitLog(
-                        LogKey.EVGRAB_BINARY_NOT_FOUND,
-                        LogLevel.ERROR,
-                        context.applicationInfo.nativeLibraryDir
-                    )
-                    stop(silent = true, markState = EvgrabState.STOPPED)
-                    break
-                }
-
-                val keyboards = discoverKeyboards()
-                _activeKeyboards.value = keyboards
-
-                if (keyboards.isEmpty()) {
-                    emitLog(LogKey.EVGRAB_NO_KEYBOARD_RETRY, LogLevel.INFO)
-                    delay(2000)
-                    continue
-                }
-
+            val libPath = resolveEvgrabBinaryPath()
+            if (libPath == null) {
                 emitLog(
-                    LogKey.EVGRAB_LOCKED_DEVICES,
-                    LogLevel.INFO,
-                    keyboards.size,
-                    keyboards.joinToString { "${it.name} (${it.eventNode})" }
+                    LogKey.EVGRAB_BINARY_NOT_FOUND,
+                    LogLevel.ERROR,
+                    context.applicationInfo.nativeLibraryDir
                 )
+                stop(silent = true, markState = EvgrabState.STOPPED)
+                return@launch
+            }
 
-                val jobs = keyboards.map { kb ->
-                    launch {
-                        runEvgrabForDevice(libPath, kb)
+            var noDeviceLogged = false
+            while (isActive && _state.value == EvgrabState.RUNNING) {
+                rescanSignal.set(false)
+                val (keyboards, mice) = discoverInputDevices()
+
+                _activeKeyboards.value = keyboards
+                _activeEvMice.value = if (mouseSender != null) mice else emptyList()
+
+                val newKbs = keyboards.filter { !runningGrabs.containsKey(it.eventNode) }
+                if (newKbs.isNotEmpty()) {
+                    emitLog(
+                        LogKey.EVGRAB_LOCKED_DEVICES,
+                        LogLevel.INFO,
+                        newKbs.size,
+                        newKbs.joinToString { "${it.name} (${it.eventNode})" }
+                    )
+                    for (kb in newKbs) {
+                        launchKeyboardGrab(libPath, kb)
                     }
                 }
 
-                jobs.forEach { it.join() }
-
-                if (_state.value != EvgrabState.RUNNING || !isActive) {
-                    break
+                if (mouseSender != null) {
+                    val newMice = mice.filter { !runningGrabs.containsKey(it.eventNode) }
+                    if (newMice.isNotEmpty()) {
+                        emitLog(
+                            LogKey.EVGRAB_LOCKED_MICE,
+                            LogLevel.INFO,
+                            newMice.size,
+                            newMice.joinToString { "${it.name} (${it.eventNode})" }
+                        )
+                        for (mouse in newMice) {
+                            launchMouseGrab(libPath, mouse)
+                        }
+                    }
                 }
 
-                emitLog(LogKey.EVGRAB_DISCONNECTED_RETRY, LogLevel.WARN)
-                delay(2000)
+                if (runningGrabs.isEmpty() && keyboards.isEmpty() && (mouseSender == null || mice.isEmpty())) {
+                    if (!noDeviceLogged) {
+                        noDeviceLogged = true
+                        emitLog(LogKey.EVGRAB_NO_KEYBOARD_RETRY, LogLevel.INFO)
+                    }
+                } else {
+                    noDeviceLogged = false
+                }
+
+                // Poll every 1.5s (waking early if hotplug rescan triggered) so additional OTG hub devices attach seamlessly
+                for (step in 0 until 15) {
+                    if (!isActive || _state.value != EvgrabState.RUNNING) break
+                    if (rescanSignal.getAndSet(false)) break
+                    delay(100)
+                }
             }
         }
     }
 
-    private suspend fun runEvgrabForDevice(libPath: String, kb: DiscoveredKeyboard) {
-        var process: Process? = null
-        try {
-            val cmd = arrayOf("su", "-c", "exec \"$libPath\" ${kb.eventNode}")
-            process = Runtime.getRuntime().exec(cmd)
-            synchronized(processLock) {
-                activeProcesses.add(process)
-            }
+    private fun CoroutineScope.launchKeyboardGrab(libPath: String, kb: DiscoveredKeyboard) {
+        lateinit var entry: RunningGrabProcess
+        val job = launch {
+            var process: Process? = null
+            val sourceId = "usb:${kb.eventNode}"
+            try {
+                val cmd = arrayOf("su", "-c", "exec \"$libPath\" ${kb.eventNode}")
+                process = Runtime.getRuntime().exec(cmd)
+                entry.process = process
 
-            emitLog(LogKey.EVGRAB_LISTENING, LogLevel.SUCCESS, kb.name, kb.eventNode)
+                emitLog(LogKey.EVGRAB_LISTENING, LogLevel.SUCCESS, kb.name, kb.eventNode)
 
-            val input = DataInputStream(process.inputStream)
-            val errReader = process.errorStream.bufferedReader()
-            val buf = ByteArray(8)
+                val input = DataInputStream(process.inputStream)
+                val errReader = process.errorStream.bufferedReader()
+                val buf = ByteArray(8)
 
-            val errJob = scope.launch(Dispatchers.IO) {
-                try {
-                    while (isActive) {
-                        val line = errReader.readLine() ?: break
-                        if (line.isNotBlank()) {
-                            emitLog(LogKey.EVGRAB_STDERR, LogLevel.WARN, line)
+                val errJob = scope.launch(Dispatchers.IO) {
+                    try {
+                        while (isActive) {
+                            val line = errReader.readLine() ?: break
+                            if (line.isNotBlank()) {
+                                emitLog(LogKey.EVGRAB_STDERR, LogLevel.WARN, line)
+                            }
                         }
-                    }
-                } catch (_: Exception) {
+                    } catch (_: Exception) {}
                 }
-            }
 
-            // High-priority dedicated thread reading 8-byte HID reports from stdout without IO-pool throttling during screen-off
-            val readerStopped = AtomicBoolean(false)
-            val readThread = Thread {
-                try {
-                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
-                } catch (_: Throwable) {}
-                try {
-                    while (!readerStopped.get() && !Thread.currentThread().isInterrupted) {
-                        input.readFully(buf)
-                        keySender.sendRawReport(KeySource.USB, buf)
-                    }
-                } catch (_: Exception) {
+                val readerStopped = AtomicBoolean(false)
+                val readThread = Thread {
+                    try {
+                        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
+                    } catch (_: Throwable) {}
+                    try {
+                        while (!readerStopped.get() && !Thread.currentThread().isInterrupted) {
+                            input.readFully(buf)
+                            keySender.sendRawReport(sourceId, buf)
+                        }
+                    } catch (_: Exception) {}
+                }.apply {
+                    name = "EvgrabKb-${kb.eventNode}"
+                    isDaemon = true
+                    start()
                 }
-            }.apply {
-                name = "EvgrabStdoutReader"
-                isDaemon = true
-                start()
-            }
 
-            val exitCode = process.waitFor()
-            readerStopped.set(true)
-            readThread.interrupt()
-            errJob.cancel()
+                val exitCode = process.waitFor()
+                readerStopped.set(true)
+                readThread.interrupt()
+                errJob.cancel()
 
-            emitLog(
-                LogKey.EVGRAB_PROCESS_EXITED,
-                if (exitCode == 0) LogLevel.SUCCESS else LogLevel.WARN,
-                kb.eventNode,
-                exitCode
-            )
+                emitLog(
+                    LogKey.EVGRAB_PROCESS_EXITED,
+                    if (exitCode == 0) LogLevel.SUCCESS else LogLevel.WARN,
+                    kb.eventNode,
+                    exitCode
+                )
 
-            if (exitCode == 0 && _state.value == EvgrabState.RUNNING) {
-                // Exit code 0: user pressed Ctrl+Alt+Q or process received SIGTERM/SIGINT.
-                // Do not auto-restart; UI switches to "Stopped by Hotkey".
-                _state.value = EvgrabState.STOPPED_BY_HOTKEY
-                HidRelayForegroundService.setEvgrabRunning(context, false)
-                emitLog(LogKey.EVGRAB_STOPPED_BY_HOTKEY, LogLevel.WARN)
-                terminateAllProcesses()
-                keySender.clearSource(KeySource.USB)
-                _activeKeyboards.value = emptyList()
-            }
-        } catch (e: Exception) {
-            emitLog(
-                LogKey.EVGRAB_EXEC_EXCEPTION,
-                LogLevel.ERROR,
-                kb.eventNode,
-                e.localizedMessage ?: "Unknown error"
-            )
-        } finally {
-            if (process != null) {
-                synchronized(processLock) {
-                    activeProcesses.remove(process)
+                if (exitCode == 0 && _state.value == EvgrabState.RUNNING) {
+                    _state.value = EvgrabState.STOPPED_BY_HOTKEY
+                    HidRelayForegroundService.setEvgrabRunning(context, false)
+                    emitLog(LogKey.EVGRAB_STOPPED_BY_HOTKEY, LogLevel.WARN)
+                    terminateAllProcesses()
+                    keySender.clearSourcesWithPrefix("usb:")
+                    mouseSender?.clearMouse()
+                    _activeKeyboards.value = emptyList()
+                    _activeEvMice.value = emptyList()
                 }
-                try { process.destroy() } catch (_: Exception) {}
+            } catch (e: Exception) {
+                emitLog(
+                    LogKey.EVGRAB_EXEC_EXCEPTION,
+                    LogLevel.ERROR,
+                    kb.eventNode,
+                    e.localizedMessage ?: "Unknown error"
+                )
+            } finally {
+                runningGrabs.remove(kb.eventNode, entry)
+                try { process?.destroy() } catch (_: Exception) {}
+                keySender.removeSource(sourceId)
+                _activeKeyboards.value = _activeKeyboards.value.filter { it.eventNode != kb.eventNode }
             }
-            keySender.clearSource(KeySource.USB)
         }
+        entry = RunningGrabProcess(kb.eventNode, isMouse = false, job = job)
+        runningGrabs[kb.eventNode] = entry
+    }
+
+    private fun CoroutineScope.launchMouseGrab(libPath: String, mouse: DiscoveredMouse) {
+        val mSender = mouseSender ?: return
+        lateinit var entry: RunningGrabProcess
+        val job = launch {
+            var process: Process? = null
+            val sourceId = "evmouse:${mouse.eventNode}"
+            try {
+                val cmd = arrayOf("su", "-c", "exec \"$libPath\" --mouse ${mouse.eventNode}")
+                process = Runtime.getRuntime().exec(cmd)
+                entry.process = process
+
+                emitLog(LogKey.EVGRAB_MOUSE_LISTENING, LogLevel.SUCCESS, mouse.name, mouse.eventNode)
+
+                val input = DataInputStream(process.inputStream)
+                val errReader = process.errorStream.bufferedReader()
+                val buf = ByteArray(4)
+
+                val errJob = scope.launch(Dispatchers.IO) {
+                    try {
+                        while (isActive) {
+                            val line = errReader.readLine() ?: break
+                            if (line.isNotBlank()) {
+                                emitLog(LogKey.EVGRAB_STDERR, LogLevel.WARN, line)
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                val readerStopped = AtomicBoolean(false)
+                val readThread = Thread {
+                    try {
+                        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY)
+                    } catch (_: Throwable) {}
+                    try {
+                        while (!readerStopped.get() && !Thread.currentThread().isInterrupted) {
+                            input.readFully(buf)
+                            val buttons = buf[0].toInt() and 0x1F
+                            val dx = buf[1].toInt()
+                            val dy = buf[2].toInt()
+                            val wheel = buf[3].toInt()
+                            mSender.sendRelativeMove(
+                                sourceId = sourceId,
+                                buttonsMask = buttons,
+                                dx = dx,
+                                dy = dy,
+                                wheel = wheel
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }.apply {
+                    name = "EvgrabMouse-${mouse.eventNode}"
+                    isDaemon = true
+                    start()
+                }
+
+                val exitCode = process.waitFor()
+                readerStopped.set(true)
+                readThread.interrupt()
+                errJob.cancel()
+
+                emitLog(
+                    LogKey.EVGRAB_PROCESS_EXITED,
+                    if (exitCode == 0) LogLevel.SUCCESS else LogLevel.WARN,
+                    mouse.eventNode,
+                    exitCode
+                )
+            } catch (e: Exception) {
+                emitLog(
+                    LogKey.EVGRAB_EXEC_EXCEPTION,
+                    LogLevel.ERROR,
+                    mouse.eventNode,
+                    e.localizedMessage ?: "Unknown error"
+                )
+            } finally {
+                runningGrabs.remove(mouse.eventNode, entry)
+                try { process?.destroy() } catch (_: Exception) {}
+                mSender.removeSource(sourceId)
+                _activeEvMice.value = _activeEvMice.value.filter { it.eventNode != mouse.eventNode }
+            }
+        }
+        entry = RunningGrabProcess(mouse.eventNode, isMouse = true, job = job)
+        runningGrabs[mouse.eventNode] = entry
     }
 
     private fun terminateAllProcesses() {
-        synchronized(processLock) {
-            for (p in activeProcesses) {
-                try { p.destroy() } catch (_: Exception) {}
-            }
-            activeProcesses.clear()
+        for (entry in runningGrabs.values) {
+            try { entry.job.cancel() } catch (_: Exception) {}
+            try { entry.process?.destroy() } catch (_: Exception) {}
         }
+        runningGrabs.clear()
         scope.launch(Dispatchers.IO) {
             try {
                 Runtime.getRuntime().exec(arrayOf("su", "-c", "pkill -f libevgrab.so")).waitFor()
@@ -226,8 +359,10 @@ class EvgrabManager(
         managerJob = null
 
         terminateAllProcesses()
+        keySender.clearSourcesWithPrefix("usb:")
         clearForegroundKeys()
         _activeKeyboards.value = emptyList()
+        _activeEvMice.value = emptyList()
 
         if (!silent) {
             emitLog(LogKey.EVGRAB_STOPPED, LogLevel.INFO)
@@ -236,15 +371,15 @@ class EvgrabManager(
 
     fun clearForegroundKeys() {
         synchronized(fgLock) {
-            fgModifiers = 0
-            fgPressedKeys.clear()
+            fgDeviceStates.clear()
+            loggedFgDeviceIds.clear()
         }
-        keySender.clearSource(KeySource.USB)
+        keySender.clearSourcesWithPrefix("fg_usb:")
     }
 
     /**
-     * Foreground OTG physical keyboard fallback when evgrab is STOPPED (no root / libevgrab.so needed).
-     * Does not intercept hardware key events while RUNNING or STOPPED_BY_HOTKEY.
+     * Foreground OTG multi-keyboard fallback when evgrab is STOPPED (no root / libevgrab.so needed).
+     * Tracks modifier and pressed-key state separately per Android InputDevice ID.
      */
     fun onForegroundHardwareKeyEvent(event: KeyEvent): Boolean {
         if (_state.value != EvgrabState.STOPPED) return false
@@ -257,7 +392,6 @@ class EvgrabManager(
             return false
         }
 
-        // Do not intercept system navigation, volume, or power keys
         when (event.keyCode) {
             KeyEvent.KEYCODE_BACK,
             KeyEvent.KEYCODE_HOME,
@@ -272,22 +406,24 @@ class EvgrabManager(
         val isUp = event.action == KeyEvent.ACTION_UP
         if (!isDown && !isUp) return false
 
-        // Ignore OS key auto-repeat (target device handles key repeat)
         if (isDown && event.repeatCount > 0) return true
 
+        val sourceId = "fg_usb:${event.deviceId}"
         val scanMod = HidTextInputView.evdevScanCodeToModifierMask(event.scanCode)
         val modMask = if (scanMod != 0) scanMod else HidTextInputView.getModifierMask(event.keyCode)
         if (modMask != 0) {
+            val firstTimeForDev: Boolean
             synchronized(fgLock) {
-                fgModifiers = if (isDown) {
-                    (fgModifiers.toInt() or modMask).toByte()
+                val st = fgDeviceStates.getOrPut(event.deviceId) { FgKeyState() }
+                st.modifiers = if (isDown) {
+                    (st.modifiers.toInt() or modMask).toByte()
                 } else {
-                    (fgModifiers.toInt() and modMask.inv()).toByte()
+                    (st.modifiers.toInt() and modMask.inv()).toByte()
                 }
-                keySender.updateSourceKeys(KeySource.USB, fgModifiers, fgPressedKeys)
+                keySender.updateSourceKeys(sourceId, st.modifiers, st.pressedKeys)
+                firstTimeForDev = loggedFgDeviceIds.add(event.deviceId)
             }
-            if (!fgModeLogged) {
-                fgModeLogged = true
+            if (firstTimeForDev) {
                 emitLog(LogKey.USB_FG_DETECTED, LogLevel.INFO, dev.name)
             }
             return true
@@ -296,16 +432,18 @@ class EvgrabManager(
         val scanUsage = if (event.scanCode > 0) HidTextInputView.evdevScanCodeToHidUsage(event.scanCode) else 0.toByte()
         val usage = if (scanUsage != 0.toByte()) scanUsage else HidTextInputView.androidKeyCodeToHidUsage(event.keyCode)
         if (usage != 0.toByte()) {
+            val firstTimeForDev: Boolean
             synchronized(fgLock) {
+                val st = fgDeviceStates.getOrPut(event.deviceId) { FgKeyState() }
                 if (isDown) {
-                    fgPressedKeys.add(usage)
+                    st.pressedKeys.add(usage)
                 } else {
-                    fgPressedKeys.remove(usage)
+                    st.pressedKeys.remove(usage)
                 }
-                keySender.updateSourceKeys(KeySource.USB, fgModifiers, fgPressedKeys)
+                keySender.updateSourceKeys(sourceId, st.modifiers, st.pressedKeys)
+                firstTimeForDev = loggedFgDeviceIds.add(event.deviceId)
             }
-            if (!fgModeLogged) {
-                fgModeLogged = true
+            if (firstTimeForDev) {
                 emitLog(LogKey.USB_FG_DETECTED, LogLevel.INFO, dev.name)
             }
             return true
@@ -314,9 +452,6 @@ class EvgrabManager(
         return false
     }
 
-    /**
-     * Resolves the libevgrab.so executable path, or returns null if unavailable.
-     */
     private fun resolveEvgrabBinaryPath(): String? {
         val nativeDir = context.applicationInfo.nativeLibraryDir
         val primary = File(nativeDir, "libevgrab.so")
@@ -344,7 +479,6 @@ class EvgrabManager(
             if (File(c).exists()) return c
         }
 
-        // Android SELinux may block direct access to /data/local/tmp or Termux; probe and chmod via su
         return try {
             val checkCmd = rootCandidates.joinToString(" ") { "\"$it\"" }
             val p = Runtime.getRuntime().exec(
@@ -358,10 +492,7 @@ class EvgrabManager(
         }
     }
 
-    /**
-     * Scans /proc/bus/input/devices (falling back to su) for keyboards with both EV_KEY (0x2) and EV_REP (0x100000).
-     */
-    private fun discoverKeyboards(): List<DiscoveredKeyboard> {
+    private fun discoverInputDevices(): Pair<List<DiscoveredKeyboard>, List<DiscoveredMouse>> {
         val directContent = try {
             val f = File("/proc/bus/input/devices")
             if (f.canRead()) f.readText().takeIf { it.isNotBlank() } else null
@@ -379,36 +510,50 @@ class EvgrabManager(
         }
 
         if (content.isBlank()) {
-            return emptyList()
+            return Pair(emptyList(), emptyList())
         }
 
-        val result = mutableListOf<DiscoveredKeyboard>()
+        val keyboards = mutableListOf<DiscoveredKeyboard>()
+        val mice = mutableListOf<DiscoveredMouse>()
         val blocks = content.split(Regex("\\r?\\n\\r?\\n+"))
+        val mouseHandlerRegex = Regex("""\bmouse\d+\b""")
+        val eventNodeRegex = Regex("""event(\d+)""")
+
         for (block in blocks) {
             var name = ""
+            var vendor = ""
             var handlers = ""
             var evHex = ""
 
             for (line in block.lines()) {
                 val trimmed = line.trim()
                 when {
+                    trimmed.startsWith("I:") -> {
+                        vendor = Regex("""Vendor=([0-9a-fA-F]+)""").find(trimmed)?.groupValues?.getOrNull(1) ?: ""
+                    }
                     trimmed.startsWith("N: Name=") -> name = trimmed.substringAfter("N: Name=").trim('"', ' ')
                     trimmed.startsWith("H: Handlers=") -> handlers = trimmed.substringAfter("H: Handlers=").trim()
                     trimmed.startsWith("B: EV=") -> evHex = trimmed.substringAfter("B: EV=").trim()
                 }
             }
 
+            // Skip Wacom vendor (056a) so WacomUsbManager handles tablets exclusively
+            if (vendor.equals("056a", ignoreCase = true)) continue
+
             val ev = evHex.toLongOrNull(16) ?: 0L
             val hasKey = (ev and 0x2L) != 0L       // EV_KEY (1 << 1)
+            val hasRel = (ev and 0x4L) != 0L       // EV_REL (1 << 2)
+            val hasAbs = (ev and 0x8L) != 0L       // EV_ABS (1 << 3)
             val hasRep = (ev and 0x100000L) != 0L  // EV_REP (1 << 20)
-            val eventMatch = Regex("""event(\d+)""").find(handlers)
-            val eventNode = eventMatch?.value
+            val eventNode = eventNodeRegex.find(handlers)?.value ?: continue
 
-            if (eventNode != null && hasKey && hasRep) {
-                result.add(DiscoveredKeyboard(name.ifEmpty { "External USB Keyboard" }, "/dev/input/$eventNode"))
+            if (hasKey && hasRep) {
+                keyboards.add(DiscoveredKeyboard(name.ifEmpty { "External USB Keyboard" }, "/dev/input/$eventNode"))
+            } else if (mouseHandlerRegex.containsMatchIn(handlers) && hasKey && hasRel && !hasAbs) {
+                mice.add(DiscoveredMouse(name.ifEmpty { "External USB Mouse" }, "/dev/input/$eventNode"))
             }
         }
 
-        return result
+        return Pair(keyboards, mice)
     }
 }

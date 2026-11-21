@@ -62,7 +62,8 @@ enum class HidState {
 enum class HidProfileMode {
     COMBO,
     WACOM_PEN,
-    KEYBOARD
+    KEYBOARD,
+    MOUSE
 }
 
 class RelayManager(private val context: Context) {
@@ -106,8 +107,36 @@ class RelayManager(private val context: Context) {
             "C0C0"
         ).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
-        // Combined Keyboard (Report ID 1) + Wacom Pen Digitizer (Report ID 2) HID Descriptor (159 bytes)
-        val COMBO_REPORT_DESCRIPTOR: ByteArray = REPORT_DESCRIPTOR + WACOM_PEN_REPORT_DESCRIPTOR
+        // 4-byte HID Mouse Report Descriptor with Report ID = 3 (64 bytes)
+        // Payload: [buttons(5-bit), dx(int8), dy(int8), wheel(int8)]
+        val MOUSE_REPORT_DESCRIPTOR: ByteArray = (
+            "05010902A101" +
+            "85030901A100" +
+            "050919012905" +
+            "15002501950575018102" +
+            "950175038103" +
+            "050109300931" +
+            "1581257F750895028106" +
+            "09381581257F750895018106" +
+            "C0C0"
+        ).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+        // 4-byte HID Mouse Report Descriptor WITHOUT Report ID (62 bytes, for ID=0 hosts / Boot mouse)
+        val MOUSE_REPORT_DESCRIPTOR_NO_ID: ByteArray = (
+            "05010902A101" +
+            "0901A100" +
+            "050919012905" +
+            "15002501950575018102" +
+            "950175038103" +
+            "050109300931" +
+            "1581257F750895028106" +
+            "09381581257F750895018106" +
+            "C0C0"
+        ).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+        // Combined Keyboard (ID 1) + Wacom Pen (ID 2) + Mouse (ID 3) HID Descriptor (223 bytes)
+        val COMBO_REPORT_DESCRIPTOR: ByteArray =
+            REPORT_DESCRIPTOR + WACOM_PEN_REPORT_DESCRIPTOR + MOUSE_REPORT_DESCRIPTOR
     }
 
     private val bluetoothManager: BluetoothManager? =
@@ -122,6 +151,12 @@ class RelayManager(private val context: Context) {
 
     // Serialized high-priority HID pen digitizer sender (Report ID 2)
     val penSender = HidPenSender(
+        log = { msg, lvl -> log(msg, lvl) },
+        logKey = { key, lvl, args -> log(key, lvl, *args) }
+    )
+
+    // Serialized high-priority HID mouse sender (Report ID 3)
+    val mouseSender = HidMouseSender(
         log = { msg, lvl -> log(msg, lvl) },
         logKey = { key, lvl, args -> log(key, lvl, *args) }
     )
@@ -161,9 +196,13 @@ class RelayManager(private val context: Context) {
     private val _isClientConnected = MutableStateFlow(false)
     val isClientConnected: StateFlow<Boolean> = _isClientConnected.asStateFlow()
 
-    // Combined transmitted HID report packet count from Keyboard + Wacom Pen senders
-    val packetsForwarded: StateFlow<Long> = combine(keySender.packetsSent, penSender.packetsSent) { k, p ->
-        k + p
+    // Combined transmitted HID report packet count from Keyboard + Wacom Pen + Mouse senders
+    val packetsForwarded: StateFlow<Long> = combine(
+        keySender.packetsSent,
+        penSender.packetsSent,
+        mouseSender.packetsSent
+    ) { k, p, m ->
+        k + p + m
     }.stateIn(scope, SharingStarted.Eagerly, 0L)
 
     private val _targetAddress = MutableStateFlow(DEFAULT_KINDLE_MAC)
@@ -263,14 +302,26 @@ class RelayManager(private val context: Context) {
             HidProfileMode.COMBO -> {
                 keySender.keyEnabled = true
                 penSender.penEnabled = true
+                mouseSender.mouseEnabled = true
+                mouseSender.fixedReportId = HidMouseSender.MOUSE_REPORT_ID
             }
             HidProfileMode.WACOM_PEN -> {
                 keySender.keyEnabled = false
                 penSender.penEnabled = true
+                mouseSender.mouseEnabled = false
+                mouseSender.fixedReportId = HidMouseSender.MOUSE_REPORT_ID
             }
             HidProfileMode.KEYBOARD -> {
                 keySender.keyEnabled = true
                 penSender.penEnabled = false
+                mouseSender.mouseEnabled = false
+                mouseSender.fixedReportId = HidMouseSender.MOUSE_REPORT_ID
+            }
+            HidProfileMode.MOUSE -> {
+                keySender.keyEnabled = false
+                penSender.penEnabled = false
+                mouseSender.mouseEnabled = true
+                mouseSender.fixedReportId = null
             }
         }
     }
@@ -279,7 +330,7 @@ class RelayManager(private val context: Context) {
         return when (_hidProfileMode.value) {
             HidProfileMode.COMBO -> true
             HidProfileMode.WACOM_PEN -> true
-            HidProfileMode.KEYBOARD -> _reportIdMode.value != ReportIdMode.FORCE_0
+            HidProfileMode.KEYBOARD, HidProfileMode.MOUSE -> _reportIdMode.value != ReportIdMode.FORCE_0
         }
     }
 
@@ -308,6 +359,7 @@ class RelayManager(private val context: Context) {
         val prevUseId = activeUseReportId()
         _reportIdMode.value = mode
         keySender.reportIdMode = mode
+        mouseSender.reportIdMode = mode
         val nextUseId = activeUseReportId()
         log(LogKey.REPORT_ID_SWITCHED, LogLevel.INFO, mode.name)
 
@@ -377,6 +429,7 @@ class RelayManager(private val context: Context) {
                 hidDevice = hid
                 keySender.hidDevice = hid
                 penSender.hidDevice = hid
+                mouseSender.hidDevice = hid
                 syncSendersEnabled()
                 isProxyBound = true
                 log(LogKey.HID_PROXY_CONNECTED, LogLevel.INFO)
@@ -390,6 +443,7 @@ class RelayManager(private val context: Context) {
                 hidDevice = null
                 keySender.hidDevice = null
                 penSender.hidDevice = null
+                mouseSender.hidDevice = null
                 isProxyBound = false
                 _isHidRegistered.value = false
                 _connectionState.value = HidState.DISCONNECTED
@@ -434,7 +488,8 @@ class RelayManager(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun registerHidApp(hid: BluetoothHidDevice, useReportId: Boolean) {
         val profileMode = _hidProfileMode.value
-        val effectiveUseReportId = if (profileMode == HidProfileMode.KEYBOARD) useReportId else true
+        val effectiveUseReportId =
+            if (profileMode == HidProfileMode.KEYBOARD || profileMode == HidProfileMode.MOUSE) useReportId else true
         registeredWithReportId = effectiveUseReportId
         val (descriptor, subclass, sdpName) = when (profileMode) {
             HidProfileMode.COMBO -> Triple(
@@ -451,6 +506,11 @@ class RelayManager(private val context: Context) {
                 if (effectiveUseReportId) REPORT_DESCRIPTOR else REPORT_DESCRIPTOR_NO_ID,
                 BluetoothHidDevice.SUBCLASS1_KEYBOARD,
                 "RelayKeyboard"
+            )
+            HidProfileMode.MOUSE -> Triple(
+                if (effectiveUseReportId) MOUSE_REPORT_DESCRIPTOR else MOUSE_REPORT_DESCRIPTOR_NO_ID,
+                BluetoothHidDevice.SUBCLASS1_MOUSE,
+                "RelayMouse"
             )
         }
         val sdp = BluetoothHidDeviceAppSdpSettings(
@@ -489,6 +549,8 @@ class RelayManager(private val context: Context) {
                         keySender.hostDevice = existingHost
                         keySender.protocolMode = BluetoothHidDevice.PROTOCOL_REPORT_MODE
                         penSender.hostDevice = existingHost
+                        mouseSender.hostDevice = existingHost
+                        mouseSender.protocolMode = BluetoothHidDevice.PROTOCOL_REPORT_MODE
                         val devName = try { existingHost.name ?: "Unknown Host" } catch (_: Exception) { "Unknown Host" }
                         _connectedDeviceName.value = devName
                         _connectedDeviceAddress.value = existingHost.address
@@ -529,6 +591,8 @@ class RelayManager(private val context: Context) {
                             keySender.clearAll()
                             penSender.hostDevice = null
                             penSender.clearPen()
+                            mouseSender.hostDevice = null
+                            mouseSender.clearMouse()
                             _connectedDeviceName.value = null
                             _connectedDeviceAddress.value = null
                         }
@@ -548,6 +612,8 @@ class RelayManager(private val context: Context) {
                         keySender.hostDevice = device
                         keySender.protocolMode = BluetoothHidDevice.PROTOCOL_REPORT_MODE
                         penSender.hostDevice = device
+                        mouseSender.hostDevice = device
+                        mouseSender.protocolMode = BluetoothHidDevice.PROTOCOL_REPORT_MODE
                         val devName = try { device.name ?: "Unknown Host" } catch (_: Exception) { "Unknown Host" }
                         _connectedDeviceName.value = devName
                         _connectedDeviceAddress.value = device.address
@@ -570,12 +636,12 @@ class RelayManager(private val context: Context) {
                 log(LogKey.HID_GET_REPORT, LogLevel.INFO, type.toString(), id.toString(), bufferSize)
                 try {
                     if (type == BluetoothHidDevice.REPORT_TYPE_INPUT) {
-                        val payload = if (id == HidPenSender.PEN_REPORT_ID.toByte() ||
-                            _hidProfileMode.value == HidProfileMode.WACOM_PEN
-                        ) {
-                            penSender.getLastReport()
-                        } else {
-                            keySender.getLastReport()
+                        val payload = when {
+                            id == HidPenSender.PEN_REPORT_ID.toByte() || _hidProfileMode.value == HidProfileMode.WACOM_PEN ->
+                                penSender.getLastReport()
+                            id == HidMouseSender.MOUSE_REPORT_ID.toByte() || _hidProfileMode.value == HidProfileMode.MOUSE ->
+                                mouseSender.getLastReport()
+                            else -> keySender.getLastReport()
                         }
                         hid.replyReport(device, type, id, payload)
                     } else if (type == BluetoothHidDevice.REPORT_TYPE_OUTPUT) {
@@ -594,8 +660,14 @@ class RelayManager(private val context: Context) {
 
             override fun onSetProtocol(device: BluetoothDevice, protocol: Byte) {
                 keySender.protocolMode = protocol
+                mouseSender.protocolMode = protocol
                 val modeName = if (protocol == BluetoothHidDevice.PROTOCOL_BOOT_MODE) "BOOT (0)" else "REPORT (1)"
-                log(LogKey.HID_SET_PROTOCOL, LogLevel.INFO, modeName, keySender.resolveActiveReportId())
+                val activeId = if (_hidProfileMode.value == HidProfileMode.MOUSE) {
+                    mouseSender.resolveActiveReportId()
+                } else {
+                    keySender.resolveActiveReportId()
+                }
+                log(LogKey.HID_SET_PROTOCOL, LogLevel.INFO, modeName, activeId)
             }
 
             override fun onInterruptData(device: BluetoothDevice, reportId: Byte, data: ByteArray) {
@@ -819,6 +891,8 @@ class RelayManager(private val context: Context) {
         keySender.clearAll()
         penSender.clearPen()
         penSender.shutdown()
+        mouseSender.clearMouse()
+        mouseSender.shutdown()
 
         isIntentionalUnregister = true
         try {

@@ -8,6 +8,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
@@ -21,6 +24,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,7 +55,6 @@ import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
@@ -59,10 +63,11 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardHide
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -82,8 +87,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -103,8 +106,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -117,10 +120,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.ui.theme.Amber500
-import com.example.ui.theme.Cyan400
 import com.example.ui.theme.Cyan300
-import com.example.ui.theme.Emerald500
+import com.example.ui.theme.Cyan400
 import com.example.ui.theme.Emerald400
+import com.example.ui.theme.Emerald500
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.OledBlack
 import com.example.ui.theme.OledBorder
@@ -134,6 +137,9 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate900
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
 
@@ -141,12 +147,13 @@ class MainActivity : ComponentActivity() {
         private var relayManagerInstance: RelayManager? = null
         private var evgrabManagerInstance: EvgrabManager? = null
         private var wacomManagerInstance: WacomUsbManager? = null
+        private var mouseManagerInstance: MouseUsbManager? = null
     }
 
     private lateinit var relayManager: RelayManager
     private lateinit var evgrabManager: EvgrabManager
     private lateinit var wacomManager: WacomUsbManager
-    @Volatile private var isMacInputFocused: Boolean = false
+    private lateinit var mouseManager: MouseUsbManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -163,6 +170,7 @@ class MainActivity : ComponentActivity() {
         evgrabManager = evgrabManagerInstance ?: EvgrabManager(
             applicationContext,
             relayManager.keySender,
+            relayManager.mouseSender,
             log = { msg, lvl -> relayManager.log(msg, lvl) },
             logKey = { key, lvl, args -> relayManager.log(key, lvl, *args) }
         ).also {
@@ -179,21 +187,29 @@ class MainActivity : ComponentActivity() {
             wacomManagerInstance = it
         }
 
+        mouseManager = mouseManagerInstance ?: MouseUsbManager(
+            applicationContext,
+            relayManager.mouseSender,
+            log = { msg, lvl -> relayManager.log(msg, lvl) },
+            logKey = { key, lvl, args -> relayManager.log(key, lvl, *args) }
+        ).also {
+            mouseManagerInstance = it
+        }
+
         setContent {
             MyApplicationTheme {
                 MainScreen(
                     relayManager = relayManager,
                     evgrabManager = evgrabManager,
                     wacomManager = wacomManager,
-                    onMacInputFocusChanged = { focused -> isMacInputFocused = focused }
+                    mouseManager = mouseManager
                 )
             }
         }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (!isMacInputFocused &&
-            ::relayManager.isInitialized &&
+        if (::relayManager.isInitialized &&
             relayManager.connectionState.value == HidState.CONNECTED &&
             ::evgrabManager.isInitialized &&
             evgrabManager.onForegroundHardwareKeyEvent(event)
@@ -216,6 +232,12 @@ class MainActivity : ComponentActivity() {
         if (::wacomManager.isInitialized) {
             wacomManager.refreshAttachedDevice()
         }
+        if (::mouseManager.isInitialized) {
+            mouseManager.refreshAttachedDevices()
+        }
+        if (::evgrabManager.isInitialized) {
+            evgrabManager.kickRescan()
+        }
         if (hasBluetoothPermissions() && ::relayManager.isInitialized) {
             HidRelayForegroundService.start(
                 applicationContext,
@@ -228,8 +250,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus && ::evgrabManager.isInitialized) {
-            evgrabManager.clearForegroundKeys()
+        if (!hasFocus) {
+            if (::evgrabManager.isInitialized) {
+                evgrabManager.clearForegroundKeys()
+            }
+            if (::relayManager.isInitialized) {
+                relayManager.mouseSender.removeSource("fg_touchpad")
+                relayManager.mouseSender.removeSource("fg_touchpad_btn")
+                relayManager.mouseSender.removeSource("fg_capture")
+            }
         }
     }
 
@@ -242,12 +271,16 @@ class MainActivity : ComponentActivity() {
             if (::wacomManager.isInitialized) {
                 wacomManager.destroy()
             }
+            if (::mouseManager.isInitialized) {
+                mouseManager.destroy()
+            }
             HidRelayForegroundService.stop(applicationContext)
             if (::relayManager.isInitialized) {
                 relayManager.cleanup()
             }
             evgrabManagerInstance = null
             wacomManagerInstance = null
+            mouseManagerInstance = null
             relayManagerInstance = null
         }
         super.onDestroy()
@@ -268,7 +301,7 @@ fun MainScreen(
     relayManager: RelayManager,
     evgrabManager: EvgrabManager,
     wacomManager: WacomUsbManager,
-    onMacInputFocusChanged: (Boolean) -> Unit = {}
+    mouseManager: MouseUsbManager
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -280,7 +313,6 @@ fun MainScreen(
     // Observe RelayManager state
     val isHidRegistered by relayManager.isHidRegistered.collectAsState()
     val connectionState by relayManager.connectionState.collectAsState()
-    val targetAddress by relayManager.targetAddress.collectAsState()
     val connectedAddress by relayManager.connectedDeviceAddress.collectAsState()
     val connectedName by relayManager.connectedDeviceName.collectAsState()
     val isSocketListening by relayManager.isSocketListening.collectAsState()
@@ -292,6 +324,7 @@ fun MainScreen(
     // Observe EvgrabManager state
     val evgrabState by evgrabManager.state.collectAsState()
     val activeKeyboards by evgrabManager.activeKeyboards.collectAsState()
+    val activeEvMice by evgrabManager.activeEvMice.collectAsState()
 
     // Observe WacomUsbManager state
     val wacomState by wacomManager.state.collectAsState()
@@ -300,10 +333,19 @@ fun MainScreen(
     val wacomPressureCurve by wacomManager.pressureCurve.collectAsState()
     val wacomButtonMode by wacomManager.buttonMode.collectAsState()
 
+    // Observe MouseUsbManager state
+    val mouseState by mouseManager.state.collectAsState()
+    val activeUsbMice by mouseManager.activeMice.collectAsState()
+    val mouseSensitivity by mouseManager.sensitivity.collectAsState()
+
+    val combinedMouseCount = activeUsbMice.size + activeEvMice.size
+
     var showBondedDialog by remember { mutableStateOf(false) }
     var permissionsGranted by remember { mutableStateOf(false) }
+    var isStatusExpanded by remember { mutableStateOf(false) }
     var isConsoleExpanded by remember { mutableStateOf(true) }
     var isWacomCardExpanded by remember { mutableStateOf(false) }
+    var isMouseCardExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(currentLanguage) {
         relayManager.activeLanguage = currentLanguage
@@ -385,12 +427,14 @@ fun MainScreen(
                         modifier = Modifier.padding(bottom = 16.dp)
                     ) {
                         Image(
-                            painter = painterResource(id = R.drawable.ic_app_logo_1794044765794),
+                            painter = painterResource(id = R.drawable.ic_app_logo_custom),
                             contentDescription = strings.appTitle,
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(RoundedCornerShape(10.dp))
+                                .background(Slate400.copy(alpha = 0.28f))
                                 .border(1.dp, Cyan400.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                                .padding(3.dp)
                         )
                         Spacer(Modifier.width(12.dp))
                         Column {
@@ -485,6 +529,124 @@ fun MainScreen(
 
                     HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
 
+                    // Multi-OTG USB Hub Connected Devices Summary
+                    Text(
+                        text = strings.sectionOtgHub,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = OledSurfaceVariant),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, OledBorder),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("drawer_otg_hub_card")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            val wacomCount = if (wacomModel != null) 1 else 0
+                            Text(
+                                text = String.format(
+                                    strings.otgSummaryFmt,
+                                    activeKeyboards.size,
+                                    combinedMouseCount,
+                                    wacomCount
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (activeKeyboards.isNotEmpty() || combinedMouseCount > 0 || wacomCount > 0) Emerald400 else Slate400
+                            )
+                            val hubNames = buildList {
+                                activeKeyboards.forEach { add("KB: ${it.name}") }
+                                activeUsbMice.forEach { add("Mouse: ${it.name}") }
+                                activeEvMice.forEach { add("EvMouse: ${it.name}") }
+                                wacomModel?.let { add("Pen: ${it.modelName}") }
+                            }
+                            if (hubNames.isNotEmpty()) {
+                                Spacer(Modifier.height(4.dp))
+                                hubNames.forEach { devLabel ->
+                                    Text(
+                                        text = "• $devLabel",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Slate200,
+                                        fontSize = 10.5.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
+
+                    // USB OTG Mouse Relay Section
+                    Text(
+                        text = strings.sectionMouse,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = OledSurfaceVariant),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, OledBorder),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("drawer_mouse_card")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = strings.mouseTitle,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Slate100
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = when {
+                                            combinedMouseCount > 0 -> strings.mouseActiveChipFmt.replace("%d", combinedMouseCount.toString())
+                                            mouseState == MouseRelayState.WAITING_FOR_DEVICE -> strings.mouseWaitingChip
+                                            mouseState == MouseRelayState.REQUESTING_PERMISSION -> strings.mousePermChip
+                                            else -> strings.mouseNoneConnected
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = when {
+                                            combinedMouseCount > 0 || mouseState == MouseRelayState.ACTIVE -> Emerald400
+                                            mouseState == MouseRelayState.WAITING_FOR_DEVICE || mouseState == MouseRelayState.REQUESTING_PERMISSION -> Amber500
+                                            else -> Slate400
+                                        },
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                Switch(
+                                    checked = (mouseState != MouseRelayState.STOPPED),
+                                    onCheckedChange = { isChecked ->
+                                        if (isChecked) mouseManager.start() else mouseManager.stop()
+                                    },
+                                    modifier = Modifier.testTag("switch_drawer_mouse")
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = strings.mouseDesc,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate400,
+                                fontSize = 10.5.sp
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
+
                     // Wacom USB OTG Digitizer Section
                     Text(
                         text = strings.sectionWacom,
@@ -546,7 +708,7 @@ fun MainScreen(
 
                     HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
 
-                    // Bluetooth HID Profile Mode Selector (Combo / Wacom Pen Only / Keyboard Only)
+                    // Bluetooth HID Profile Mode Selector (Combo / Wacom Pen Only / Keyboard Only / Mouse Only)
                     Text(
                         text = strings.sectionHidProfile,
                         style = MaterialTheme.typography.labelMedium,
@@ -561,6 +723,7 @@ fun MainScreen(
                                 HidProfileMode.COMBO -> strings.hidProfileCombo
                                 HidProfileMode.WACOM_PEN -> strings.hidProfileWacom
                                 HidProfileMode.KEYBOARD -> strings.hidProfileKeyboard
+                                HidProfileMode.MOUSE -> strings.hidProfileMouse
                             }
                             Surface(
                                 onClick = { relayManager.setHidProfileMode(mode) },
@@ -786,9 +949,11 @@ fun MainScreen(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Status Summary Chip Card
+                    // Status Summary Chip Card (Foldable)
                     StatusSummaryCard(
                         strings = strings,
+                        isExpanded = isStatusExpanded,
+                        onToggleExpand = { isStatusExpanded = !isStatusExpanded },
                         isHidRegistered = isHidRegistered,
                         connectionState = connectionState,
                         connectedHost = connectedName ?: connectedAddress,
@@ -799,48 +964,71 @@ fun MainScreen(
                         activeKeyboards = activeKeyboards,
                         wacomState = wacomState,
                         wacomModel = wacomModel,
+                        mouseState = mouseState,
+                        activeMouseCount = combinedMouseCount,
                         onToggleEvgrab = {
                             if (evgrabState == EvgrabState.RUNNING) evgrabManager.stop() else evgrabManager.start()
                         },
                         onToggleWacom = {
                             if (wacomState == WacomState.STOPPED) wacomManager.start() else wacomManager.stop()
+                        },
+                        onToggleMouse = {
+                            if (mouseState == MouseRelayState.STOPPED) mouseManager.start() else mouseManager.stop()
                         }
                     )
 
-                    // Target Device Bluetooth Connection Card
+                    // Target Device Bluetooth Connection Card (connect initiated from target device)
                     TargetDeviceCard(
                         strings = strings,
-                        targetAddress = targetAddress,
                         connectionState = connectionState,
-                        onAddressChange = { relayManager.setTargetAddress(it) },
-                        onMacFocusChange = onMacInputFocusChanged,
+                        connectedHost = connectedName ?: connectedAddress,
                         onMakeDiscoverable = { relayManager.makeDiscoverable() },
-                        onConnectTarget = { relayManager.pairOrConnectTarget(targetAddress) },
                         onDisconnectTarget = { relayManager.disconnectTarget() },
                         onChooseBonded = { showBondedDialog = true }
                     )
 
                     // Compact Collapsible USB OTG Wacom -> Bluetooth Pen Card
-                    WacomTabletCard(
-                        strings = strings,
-                        wacomState = wacomState,
-                        detectedModel = wacomModel,
-                        liveSampleFlow = wacomManager.liveSample,
-                        orientation = wacomOrientation,
-                        pressureCurve = wacomPressureCurve,
-                        buttonMode = wacomButtonMode,
-                        isExpanded = isWacomCardExpanded,
-                        onToggleExpand = { isWacomCardExpanded = !isWacomCardExpanded },
-                        onToggleStartStop = {
-                            if (wacomState == WacomState.STOPPED) wacomManager.start() else wacomManager.stop()
-                        },
-                        onSelectOrientation = { wacomManager.setOrientation(it) },
-                        onSelectPressureCurve = { wacomManager.setPressureCurve(it) },
-                        onSelectButtonMode = { wacomManager.setButtonMode(it) }
-                    )
+                    if (hidProfileMode == HidProfileMode.COMBO || hidProfileMode == HidProfileMode.WACOM_PEN) {
+                        WacomTabletCard(
+                            strings = strings,
+                            wacomState = wacomState,
+                            detectedModel = wacomModel,
+                            liveSampleFlow = wacomManager.liveSample,
+                            orientation = wacomOrientation,
+                            pressureCurve = wacomPressureCurve,
+                            buttonMode = wacomButtonMode,
+                            isExpanded = isWacomCardExpanded,
+                            onToggleExpand = { isWacomCardExpanded = !isWacomCardExpanded },
+                            onToggleStartStop = {
+                                if (wacomState == WacomState.STOPPED) wacomManager.start() else wacomManager.stop()
+                            },
+                            onSelectOrientation = { wacomManager.setOrientation(it) },
+                            onSelectPressureCurve = { wacomManager.setPressureCurve(it) },
+                            onSelectButtonMode = { wacomManager.setButtonMode(it) }
+                        )
+                    }
+
+                    // Compact Collapsible USB OTG Mouse & Touchpad Card
+                    if (hidProfileMode == HidProfileMode.COMBO || hidProfileMode == HidProfileMode.MOUSE) {
+                        MouseTouchpadCard(
+                            strings = strings,
+                            isConnected = (connectionState == HidState.CONNECTED),
+                            mouseState = mouseState,
+                            activeUsbMice = activeUsbMice,
+                            activeEvMouseCount = activeEvMice.size,
+                            sensitivity = mouseSensitivity,
+                            mouseSender = relayManager.mouseSender,
+                            isExpanded = isMouseCardExpanded,
+                            onToggleExpand = { isMouseCardExpanded = !isMouseCardExpanded },
+                            onToggleStartStop = {
+                                if (mouseState == MouseRelayState.STOPPED) mouseManager.start() else mouseManager.stop()
+                            },
+                            onSensitivityChange = { mouseManager.setSensitivity(it) }
+                        )
+                    }
 
                     // Soft Keyboard Input Card (visible in Combo or Keyboard-only HID profile)
-                    if (hidProfileMode != HidProfileMode.WACOM_PEN) {
+                    if (hidProfileMode == HidProfileMode.COMBO || hidProfileMode == HidProfileMode.KEYBOARD) {
                         SoftKeyboardInputCard(
                             strings = strings,
                             isConnected = (connectionState == HidState.CONNECTED),
@@ -899,10 +1087,6 @@ fun MainScreen(
                         items(bondedDevices) { device ->
                             val devName = try { device.name ?: "Unknown" } catch (_: Exception) { "Unknown" }
                             Surface(
-                                onClick = {
-                                    relayManager.setTargetAddress(device.address)
-                                    showBondedDialog = false
-                                },
                                 shape = RoundedCornerShape(8.dp),
                                 color = OledSurfaceVariant,
                                 border = BorderStroke(1.dp, OledBorder),
@@ -932,7 +1116,7 @@ fun MainScreen(
                                         )
                                     }
                                     Icon(
-                                        imageVector = Icons.Default.Link,
+                                        imageVector = Icons.Default.Bluetooth,
                                         contentDescription = strings.cdSelectDevice,
                                         tint = Cyan400
                                     )
@@ -955,6 +1139,8 @@ fun MainScreen(
 @Composable
 fun StatusSummaryCard(
     strings: LocalizedStrings,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
     isHidRegistered: Boolean,
     connectionState: HidState,
     connectedHost: String?,
@@ -965,8 +1151,11 @@ fun StatusSummaryCard(
     activeKeyboards: List<DiscoveredKeyboard>,
     wacomState: WacomState,
     wacomModel: WacomModelSpec?,
+    mouseState: MouseRelayState,
+    activeMouseCount: Int,
     onToggleEvgrab: () -> Unit,
-    onToggleWacom: () -> Unit
+    onToggleWacom: () -> Unit,
+    onToggleMouse: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -976,151 +1165,239 @@ fun StatusSummaryCard(
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, OledBorder)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onToggleExpand)
+                    .testTag("status_summary_header"),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = strings.systemStatusTitle,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = Cyan400
-                )
-                PacketCountText(packetsFlow = packetsFlow)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    connectionState == HidState.CONNECTED -> Emerald500
+                                    isHidRegistered -> Cyan400
+                                    else -> Amber500
+                                }
+                            )
+                    )
+                    Column {
+                        Text(
+                            text = strings.systemStatusTitle,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Cyan400
+                        )
+                        if (!isExpanded) {
+                            val summaryText = when (connectionState) {
+                                HidState.CONNECTED -> "${strings.deviceConnected}: ${connectedHost ?: ""}"
+                                HidState.CONNECTING -> strings.chipHostConnecting
+                                HidState.DISCONNECTING -> strings.chipHostDisconnecting
+                                HidState.DISCONNECTED -> if (isHidRegistered) strings.btHidReady else strings.btHidInit
+                            }
+                            Text(
+                                text = summaryText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (connectionState == HidState.CONNECTED) Emerald400 else Slate400,
+                                fontSize = 11.sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PacketCountText(packetsFlow = packetsFlow)
+                    IconButton(
+                        onClick = onToggleExpand,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("btn_expand_status")
+                    ) {
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = strings.cdToggleExpand,
+                            tint = Cyan400
+                        )
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // HID Status Chip
-                AssistChip(
-                    onClick = {},
-                    label = {
-                        Text(if (isHidRegistered) strings.btHidReady else strings.btHidInit, color = Slate100)
-                    },
-                    leadingIcon = {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (isHidRegistered) Emerald500 else Amber500)
-                        )
-                    },
-                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
-                    modifier = Modifier.testTag("chip_hid_status")
-                )
-
-                // Host Connection Status Chip
-                AssistChip(
-                    onClick = {},
-                    label = {
-                        val label = when (connectionState) {
-                            HidState.CONNECTED -> "${strings.deviceConnected}: ${connectedHost ?: ""}"
-                            HidState.CONNECTING -> strings.chipHostConnecting
-                            HidState.DISCONNECTING -> strings.chipHostDisconnecting
-                            HidState.DISCONNECTED -> strings.deviceDisconnected
-                        }
-                        Text(label, color = Slate100)
-                    },
-                    leadingIcon = {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (connectionState == HidState.CONNECTED) Emerald500 else Slate400)
-                        )
-                    },
-                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
-                    modifier = Modifier.testTag("chip_connection_status")
-                )
-
-                // evgrab USB Grab Status Chip (clickable to toggle USB forwarding)
-                AssistChip(
-                    onClick = onToggleEvgrab,
-                    label = {
-                        val text = when (evgrabState) {
-                            EvgrabState.RUNNING -> strings.chipEvgrabRunningFmt.replace("%d", activeKeyboards.size.toString())
-                            EvgrabState.STOPPED_BY_HOTKEY -> strings.chipEvgrabHotkeyStopped
-                            EvgrabState.STOPPED -> strings.chipEvgrabForeground
-                        }
-                        Text(text, color = Slate100)
-                    },
-                    leadingIcon = {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when (evgrabState) {
-                                        EvgrabState.RUNNING -> Emerald500
-                                        EvgrabState.STOPPED_BY_HOTKEY -> Amber500
-                                        EvgrabState.STOPPED -> Cyan400
-                                    }
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(bottom = 8.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // HID Status Chip
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                Text(if (isHidRegistered) strings.btHidReady else strings.btHidInit, color = Slate100)
+                            },
+                            leadingIcon = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isHidRegistered) Emerald500 else Amber500)
                                 )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                            modifier = Modifier.testTag("chip_hid_status")
                         )
-                    },
-                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
-                    modifier = Modifier.testTag("chip_fwd_mode")
-                )
 
-                // Wacom OTG Pen Status Chip (clickable to toggle Wacom forwarding)
-                AssistChip(
-                    onClick = onToggleWacom,
-                    label = {
-                        val shortModel = wacomModel?.modelName?.substringBefore(" (") ?: "Wacom"
-                        val text = when (wacomState) {
-                            WacomState.ACTIVE -> strings.wacomActiveChipFmt.replace("%s", shortModel)
-                            WacomState.WAITING_FOR_DEVICE -> strings.wacomWaitingChip
-                            WacomState.REQUESTING_PERMISSION -> strings.wacomPermChip
-                            WacomState.STOPPED -> strings.wacomStoppedChip
-                        }
-                        Text(text, color = Slate100)
-                    },
-                    leadingIcon = {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when (wacomState) {
-                                        WacomState.ACTIVE -> Emerald500
-                                        WacomState.WAITING_FOR_DEVICE, WacomState.REQUESTING_PERMISSION -> Amber500
-                                        WacomState.STOPPED -> Slate400
-                                    }
+                        // Host Connection Status Chip
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                val label = when (connectionState) {
+                                    HidState.CONNECTED -> "${strings.deviceConnected}: ${connectedHost ?: ""}"
+                                    HidState.CONNECTING -> strings.chipHostConnecting
+                                    HidState.DISCONNECTING -> strings.chipHostDisconnecting
+                                    HidState.DISCONNECTED -> strings.deviceDisconnected
+                                }
+                                Text(label, color = Slate100)
+                            },
+                            leadingIcon = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (connectionState == HidState.CONNECTED) Emerald500 else Slate400)
                                 )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                            modifier = Modifier.testTag("chip_connection_status")
                         )
-                    },
-                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
-                    modifier = Modifier.testTag("chip_wacom_status")
-                )
 
-                // Socket Relay Status Chip
-                AssistChip(
-                    onClick = {},
-                    label = {
-                        Text(
-                            if (isClientConnected) strings.socketClientConnected
-                            else if (isSocketListening) strings.socketListening
-                            else strings.socketInactive,
-                            color = Slate100
+                        // evgrab USB Grab Status Chip (clickable to toggle USB forwarding)
+                        AssistChip(
+                            onClick = onToggleEvgrab,
+                            label = {
+                                val text = when (evgrabState) {
+                                    EvgrabState.RUNNING -> strings.chipEvgrabRunningFmt.replace("%d", activeKeyboards.size.toString())
+                                    EvgrabState.STOPPED_BY_HOTKEY -> strings.chipEvgrabHotkeyStopped
+                                    EvgrabState.STOPPED -> strings.chipEvgrabForeground
+                                }
+                                Text(text, color = Slate100)
+                            },
+                            leadingIcon = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            when (evgrabState) {
+                                                EvgrabState.RUNNING -> Emerald500
+                                                EvgrabState.STOPPED_BY_HOTKEY -> Amber500
+                                                EvgrabState.STOPPED -> Cyan400
+                                            }
+                                        )
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                            modifier = Modifier.testTag("chip_fwd_mode")
                         )
-                    },
-                    leadingIcon = {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (isClientConnected) Emerald500 else if (isSocketListening) Cyan400 else Rose500)
+
+                        // USB Mouse Status Chip (clickable to toggle USB OTG Mouse forwarding)
+                        AssistChip(
+                            onClick = onToggleMouse,
+                            label = {
+                                val text = when {
+                                    activeMouseCount > 0 -> strings.mouseActiveChipFmt.replace("%d", activeMouseCount.toString())
+                                    mouseState == MouseRelayState.WAITING_FOR_DEVICE -> strings.mouseWaitingChip
+                                    mouseState == MouseRelayState.REQUESTING_PERMISSION -> strings.mousePermChip
+                                    mouseState == MouseRelayState.ACTIVE -> strings.mouseActiveChipFmt.replace("%d", "1")
+                                    else -> strings.mouseStoppedChip
+                                }
+                                Text(text, color = Slate100)
+                            },
+                            leadingIcon = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            when {
+                                                activeMouseCount > 0 || mouseState == MouseRelayState.ACTIVE -> Emerald500
+                                                mouseState == MouseRelayState.WAITING_FOR_DEVICE || mouseState == MouseRelayState.REQUESTING_PERMISSION -> Amber500
+                                                else -> Slate400
+                                            }
+                                        )
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                            modifier = Modifier.testTag("chip_mouse_status")
                         )
-                    },
-                    colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
-                    modifier = Modifier.testTag("chip_socket_status")
-                )
+
+                        // Wacom OTG Pen Status Chip (clickable to toggle Wacom forwarding)
+                        AssistChip(
+                            onClick = onToggleWacom,
+                            label = {
+                                val shortModel = wacomModel?.modelName?.substringBefore(" (") ?: "Wacom"
+                                val text = when (wacomState) {
+                                    WacomState.ACTIVE -> strings.wacomActiveChipFmt.replace("%s", shortModel)
+                                    WacomState.WAITING_FOR_DEVICE -> strings.wacomWaitingChip
+                                    WacomState.REQUESTING_PERMISSION -> strings.wacomPermChip
+                                    WacomState.STOPPED -> strings.wacomStoppedChip
+                                }
+                                Text(text, color = Slate100)
+                            },
+                            leadingIcon = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            when (wacomState) {
+                                                WacomState.ACTIVE -> Emerald500
+                                                WacomState.WAITING_FOR_DEVICE, WacomState.REQUESTING_PERMISSION -> Amber500
+                                                WacomState.STOPPED -> Slate400
+                                            }
+                                        )
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                            modifier = Modifier.testTag("chip_wacom_status")
+                        )
+
+                        // Socket Relay Status Chip
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    if (isClientConnected) strings.socketClientConnected
+                                    else if (isSocketListening) strings.socketListening
+                                    else strings.socketInactive,
+                                    color = Slate100
+                                )
+                            },
+                            leadingIcon = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isClientConnected) Emerald500 else if (isSocketListening) Cyan400 else Rose500)
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
+                            modifier = Modifier.testTag("chip_socket_status")
+                        )
+                    }
+                }
             }
         }
     }
@@ -1141,12 +1418,9 @@ private fun PacketCountText(packetsFlow: StateFlow<Long>) {
 @Composable
 fun TargetDeviceCard(
     strings: LocalizedStrings,
-    targetAddress: String,
     connectionState: HidState,
-    onAddressChange: (String) -> Unit,
-    onMacFocusChange: (Boolean) -> Unit,
+    connectedHost: String?,
     onMakeDiscoverable: () -> Unit,
-    onConnectTarget: () -> Unit,
     onDisconnectTarget: () -> Unit,
     onChooseBonded: () -> Unit
 ) {
@@ -1159,54 +1433,49 @@ fun TargetDeviceCard(
         border = BorderStroke(1.dp, OledBorder)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Text(
-                text = strings.targetDeviceCardTitle,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = Slate100
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = strings.targetDeviceCardTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Slate100
+                )
+                if (connectionState == HidState.CONNECTED && !connectedHost.isNullOrBlank()) {
+                    Text(
+                        text = connectedHost,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Emerald400,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            if (connectionState != HidState.CONNECTED) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = strings.connectByTargetHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Slate400,
+                    fontSize = 11.5.sp
+                )
+            }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            OutlinedTextField(
-                value = targetAddress,
-                onValueChange = onAddressChange,
-                label = { Text(strings.macAddressLabel) },
-                placeholder = { Text(strings.macAddressPlaceholder) },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Cyan400,
-                    unfocusedBorderColor = OledBorder,
-                    focusedLabelColor = Cyan400,
-                    unfocusedLabelColor = Slate400,
-                    focusedTextColor = Slate100,
-                    unfocusedTextColor = Slate100
-                ),
-                trailingIcon = {
-                    if (targetAddress.isNotEmpty()) {
-                        IconButton(onClick = { onAddressChange("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = strings.cdClearMac, tint = Slate400)
-                        }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged { onMacFocusChange(it.isFocused) }
-                    .testTag("mac_address_input")
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Action Buttons
+            // Action Buttons (Connection initiated from target device via Discoverable)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(
+                    Button(
                         onClick = onMakeDiscoverable,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan400),
-                        border = BorderStroke(1.dp, OledBorder),
+                        colors = ButtonDefaults.buttonColors(containerColor = Cyan400, contentColor = Color.Black),
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp)
@@ -1214,7 +1483,7 @@ fun TargetDeviceCard(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.BluetoothSearching, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text(strings.btnMakeDiscoverable, maxLines = 1)
+                        Text(strings.btnMakeDiscoverable, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
 
                     OutlinedButton(
@@ -1244,19 +1513,6 @@ fun TargetDeviceCard(
                         Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(strings.btnDisconnect)
-                    }
-                } else {
-                    Button(
-                        onClick = onConnectTarget,
-                        colors = ButtonDefaults.buttonColors(containerColor = Cyan400, contentColor = Color.Black),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("connect_target_button")
-                    ) {
-                        Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(strings.btnPairConnect, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -1836,6 +2092,423 @@ private fun WacomTelemetryText(
         style = MaterialTheme.typography.bodySmall,
         color = if (wacomState == WacomState.ACTIVE) Emerald400 else Slate400,
         fontFamily = if (showTelemetry) FontFamily.Monospace else FontFamily.Default,
+        fontSize = 11.sp,
+        maxLines = 1
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun MouseTouchpadCard(
+    strings: LocalizedStrings,
+    isConnected: Boolean,
+    mouseState: MouseRelayState,
+    activeUsbMice: List<ConnectedUsbMouse>,
+    activeEvMouseCount: Int,
+    sensitivity: Float,
+    mouseSender: HidMouseSender,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onToggleStartStop: () -> Unit,
+    onSensitivityChange: (Float) -> Unit
+) {
+    val isRunning = mouseState != MouseRelayState.STOPPED
+    val totalMice = activeUsbMice.size + activeEvMouseCount
+    var isPointerCaptured by remember { mutableStateOf(false) }
+    var captureSurfaceView by remember { mutableStateOf<View?>(null) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("mouse_touchpad_card"),
+        colors = CardDefaults.cardColors(containerColor = OledSurface),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, if (totalMice > 0 || isPointerCaptured) Emerald500.copy(alpha = 0.6f) else OledBorder)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Mouse,
+                        contentDescription = null,
+                        tint = if (totalMice > 0 || isPointerCaptured) Emerald400 else Cyan400,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = strings.mouseTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate100
+                        )
+                        MouseTelemetryText(
+                            strings = strings,
+                            mouseState = mouseState,
+                            activeUsbMice = activeUsbMice,
+                            activeEvMouseCount = activeEvMouseCount,
+                            telemetryFlow = mouseSender.liveTelemetry
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(6.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = onToggleStartStop,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isRunning) Rose500 else Cyan400,
+                            contentColor = if (isRunning) Color.White else Color.Black
+                        ),
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("btn_toggle_mouse")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Usb,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (isRunning) strings.mouseBtnStop else strings.mouseBtnStart,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onToggleExpand,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("btn_expand_mouse")
+                    ) {
+                        Icon(
+                            imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = strings.cdToggleExpand,
+                            tint = Cyan400
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.padding(top = 10.dp)) {
+                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(bottom = 8.dp))
+
+                    // Sensitivity preset selector
+                    Text(
+                        text = strings.mouseSensitivityLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Cyan400,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(0.5f, 1.0f, 1.5f, 2.5f).forEach { scale ->
+                            val isSelected = kotlin.math.abs(sensitivity - scale) < 0.05f
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onSensitivityChange(scale) },
+                                label = { Text("${scale}x", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Cyan400.copy(alpha = 0.2f),
+                                    selectedLabelColor = Cyan300,
+                                    labelColor = Slate200
+                                ),
+                                modifier = Modifier.testTag("mouse_sens_${scale}")
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val v = captureSurfaceView
+                                if (v != null) {
+                                    if (isPointerCaptured) {
+                                        v.releasePointerCapture()
+                                        isPointerCaptured = false
+                                        mouseSender.removeSource("fg_capture")
+                                    } else {
+                                        v.isFocusable = true
+                                        v.isFocusableInTouchMode = true
+                                        v.requestFocusFromTouch()
+                                        v.requestFocus()
+                                        v.requestPointerCapture()
+                                        isPointerCaptured = v.hasPointerCapture()
+                                    }
+                                }
+                            },
+                            enabled = isConnected,
+                            border = BorderStroke(1.dp, if (isPointerCaptured) Emerald500 else OledBorder),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = if (isPointerCaptured) Emerald400 else Cyan400
+                            ),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("btn_capture_pointer")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TouchApp,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (isPointerCaptured) strings.mouseReleaseBtn else strings.mouseCaptureBtn,
+                                fontSize = 11.sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Touchpad & Pointer Capture surface
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(148.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(OledBlack)
+                            .border(
+                                width = 1.dp,
+                                color = if (isPointerCaptured) Emerald500 else OledBorder,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                    ) {
+                        AndroidView(
+                            factory = { ctx ->
+                                val touchSlop = ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()
+                                object : View(ctx) {
+                                    override fun onPointerCaptureChange(hasCapture: Boolean) {
+                                        super.onPointerCaptureChange(hasCapture)
+                                        isPointerCaptured = hasCapture
+                                        if (!hasCapture) {
+                                            mouseSender.removeSource("fg_capture")
+                                        }
+                                    }
+                                }.apply {
+                                    isFocusable = true
+                                    isFocusableInTouchMode = true
+
+                                    var prevX = 0f
+                                    var prevY = 0f
+                                    var downX = 0f
+                                    var downY = 0f
+                                    var prevMidY = 0f
+                                    var downTimeMs = 0L
+                                    var maxPointers = 0
+                                    var maxMoveDist = 0f
+                                    var remX = 0f
+                                    var remY = 0f
+                                    var remScroll = 0f
+
+                                    var capRemX = 0f
+                                    var capRemY = 0f
+                                    var capRemWheel = 0f
+
+                                    setOnTouchListener { view, event ->
+                                        view.parent?.requestDisallowInterceptTouchEvent(true)
+                                        when (event.actionMasked) {
+                                            MotionEvent.ACTION_DOWN -> {
+                                                prevX = event.x
+                                                prevY = event.y
+                                                downX = event.x
+                                                downY = event.y
+                                                downTimeMs = event.eventTime
+                                                maxPointers = 1
+                                                maxMoveDist = 0f
+                                                true
+                                            }
+                                            MotionEvent.ACTION_POINTER_DOWN -> {
+                                                maxPointers = max(maxPointers, event.pointerCount)
+                                                if (event.pointerCount >= 2) {
+                                                    prevMidY = (event.getY(0) + event.getY(1)) * 0.5f
+                                                }
+                                                true
+                                            }
+                                            MotionEvent.ACTION_MOVE -> {
+                                                maxPointers = max(maxPointers, event.pointerCount)
+                                                if (event.pointerCount == 1 && maxPointers == 1) {
+                                                    val rawDx = (event.x - prevX) * sensitivity
+                                                    val rawDy = (event.y - prevY) * sensitivity
+                                                    prevX = event.x
+                                                    prevY = event.y
+                                                    maxMoveDist = max(maxMoveDist, hypot(event.x - downX, event.y - downY))
+
+                                                    val totX = rawDx + remX
+                                                    val totY = rawDy + remY
+                                                    val ix = totX.roundToInt()
+                                                    val iy = totY.roundToInt()
+                                                    remX = totX - ix
+                                                    remY = totY - iy
+                                                    if (ix != 0 || iy != 0) {
+                                                        mouseSender.sendRelativeMove("fg_touchpad", null, ix, iy, 0)
+                                                    }
+                                                } else if (event.pointerCount >= 2) {
+                                                    val midY = (event.getY(0) + event.getY(1)) * 0.5f
+                                                    val dMidY = midY - prevMidY
+                                                    prevMidY = midY
+                                                    maxMoveDist = max(maxMoveDist, touchSlop + 4f)
+                                                    val rawWheel = (-dMidY / 26f) + remScroll
+                                                    val iw = rawWheel.roundToInt()
+                                                    remScroll = rawWheel - iw
+                                                    if (iw != 0) {
+                                                        mouseSender.sendRelativeMove("fg_touchpad", null, 0, 0, iw)
+                                                    }
+                                                }
+                                                true
+                                            }
+                                            MotionEvent.ACTION_UP -> {
+                                                val elapsed = event.eventTime - downTimeMs
+                                                if (maxMoveDist < touchSlop && elapsed < 260L) {
+                                                    val clickBit = if (maxPointers >= 2) 0x02 else 0x01
+                                                    mouseSender.updateSourceButtons("fg_touchpad", clickBit)
+                                                    view.postDelayed({
+                                                        mouseSender.updateSourceButtons("fg_touchpad", 0)
+                                                    }, 35L)
+                                                }
+                                                true
+                                            }
+                                            MotionEvent.ACTION_CANCEL -> true
+                                            else -> true
+                                        }
+                                    }
+
+                                    setOnCapturedPointerListener { _, event ->
+                                        val btnState = event.buttonState
+                                        var mask = 0
+                                        if ((btnState and MotionEvent.BUTTON_PRIMARY) != 0) mask = mask or 0x01
+                                        if ((btnState and MotionEvent.BUTTON_SECONDARY) != 0) mask = mask or 0x02
+                                        if ((btnState and MotionEvent.BUTTON_TERTIARY) != 0) mask = mask or 0x04
+                                        if ((btnState and MotionEvent.BUTTON_BACK) != 0) mask = mask or 0x08
+                                        if ((btnState and MotionEvent.BUTTON_FORWARD) != 0) mask = mask or 0x10
+
+                                        val totX = event.getAxisValue(MotionEvent.AXIS_X) * sensitivity + capRemX
+                                        val totY = event.getAxisValue(MotionEvent.AXIS_Y) * sensitivity + capRemY
+                                        val totW = event.getAxisValue(MotionEvent.AXIS_VSCROLL) + capRemWheel
+                                        val ix = totX.roundToInt()
+                                        val iy = totY.roundToInt()
+                                        val iw = totW.roundToInt()
+                                        capRemX = totX - ix
+                                        capRemY = totY - iy
+                                        capRemWheel = totW - iw
+
+                                        mouseSender.sendRelativeMove("fg_capture", mask, ix, iy, iw)
+                                        true
+                                    }
+
+                                    captureSurfaceView = this
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("touchpad_surface")
+                        )
+
+                        Text(
+                            text = if (isPointerCaptured) strings.mouseReleaseBtn else strings.mouseTouchpadHint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isPointerCaptured) Emerald400 else Slate400,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(horizontal = 16.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Tactile Left / Middle / Right Mouse Buttons (min height 48.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val mouseButtons = listOf(
+                            Triple(0x01, strings.mouseBtnLeft, "btn_mouse_left"),
+                            Triple(0x04, strings.mouseBtnMiddle, "btn_mouse_middle"),
+                            Triple(0x02, strings.mouseBtnRight, "btn_mouse_right")
+                        )
+                        mouseButtons.forEach { (bit, label, tag) ->
+                            var isHeld by remember { mutableStateOf(false) }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isHeld) Cyan400.copy(alpha = 0.25f) else OledSurfaceVariant,
+                                border = BorderStroke(1.dp, if (isHeld) Cyan400 else OledBorder),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag(tag)
+                                    .pointerInput(bit) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                isHeld = true
+                                                mouseSender.updateSourceButtons("fg_touchpad_btn", bit)
+                                                tryAwaitRelease()
+                                                isHeld = false
+                                                mouseSender.updateSourceButtons("fg_touchpad_btn", 0)
+                                            }
+                                        )
+                                    }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isHeld) Cyan300 else Slate100
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MouseTelemetryText(
+    strings: LocalizedStrings,
+    mouseState: MouseRelayState,
+    activeUsbMice: List<ConnectedUsbMouse>,
+    activeEvMouseCount: Int,
+    telemetryFlow: StateFlow<MouseTelemetrySample?>
+) {
+    val sample by telemetryFlow.collectAsState()
+    val totalActive = activeUsbMice.size + activeEvMouseCount
+    val subtitleText = when {
+        sample != null && (totalActive > 0 || mouseState != MouseRelayState.STOPPED) -> {
+            val s = sample!!
+            "OTG:$totalActive  BTN:0x%02X  dX:%d dY:%d W:%d".format(
+                s.buttonsMask,
+                s.lastDx,
+                s.lastDy,
+                s.lastWheel
+            )
+        }
+        activeUsbMice.isNotEmpty() -> activeUsbMice.joinToString { it.name }
+        activeEvMouseCount > 0 -> strings.mouseActiveChipFmt.replace("%d", activeEvMouseCount.toString())
+        else -> strings.mouseNoneConnected
+    }
+    Text(
+        text = subtitleText,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (totalActive > 0 || mouseState == MouseRelayState.ACTIVE) Emerald400 else Slate400,
+        fontFamily = if (sample != null) FontFamily.Monospace else FontFamily.Default,
         fontSize = 11.sp,
         maxLines = 1
     )

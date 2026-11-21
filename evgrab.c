@@ -1,14 +1,10 @@
-// evgrab：獨占讀取 USB 鍵盤，把按鍵轉成 8 位元組 HID boot keyboard 報告寫到 stdout
-//   報告格式：[修飾鍵, 0, 鍵1..鍵6]
-//   用法：evgrab /dev/input/eventN        （需要 root）
-//   結束：SIGTERM / SIGINT、stdout 被關閉、鍵盤被拔除，或按 Ctrl+Alt+Q
-//   結束碼：0 = 使用者按了 Ctrl+Alt+Q 或被要求停止；非 0 = 錯誤或鍵盤被拔除
-//   結束時 close(fd) 會讓核心自動釋放獨占，手機即恢復正常接收這支鍵盤。
-//
-// 編譯（NDK）：
-//   $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang   -O2 -pie -o libevgrab.so evgrab.c
-//   $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi28-clang -O2 -pie -o libevgrab.so evgrab.c
-// 編譯（Termux，測試用）：pkg install clang && clang -O2 evgrab.c -o evgrab
+// evgrab: Exclusively grabs a USB keyboard or mouse via EVIOCGRAB and writes HID reports to stdout.
+//   Keyboard mode (default): evgrab /dev/input/eventN
+//     8-byte Boot Keyboard reports: [modifier, 0, key1..key6]
+//     Exit hotkey: Ctrl+Alt+Q (exit code 0)
+//   Mouse mode: evgrab --mouse /dev/input/eventN
+//     4-byte Mouse reports: [buttons(5-bit), dx(int8), dy(int8), wheel(int8)]
+//   Closing fd on exit releases EVIOCGRAB in the kernel so the phone resumes normal input.
 
 #include <errno.h>
 #include <fcntl.h>
@@ -22,8 +18,8 @@
 static volatile sig_atomic_t stop_flag = 0;
 static void on_signal(int s) { (void)s; stop_flag = 1; }
 
-static unsigned char hid_of[256];   // evdev code -> HID usage（0 = 不處理）
-static unsigned char mod_of[256];   // evdev code -> 修飾鍵位元
+static unsigned char hid_of[256];   // evdev code -> HID usage (0 = ignored)
+static unsigned char mod_of[256];   // evdev code -> modifier bitmask
 
 static void init_map(void) {
     static const struct { int code; unsigned char usage; } t[] = {
@@ -40,7 +36,7 @@ static void init_map(void) {
     static const unsigned char kp_u[] = {0x5F,0x60,0x61,0x5C,0x5D,0x5E,0x59,0x5A,0x5B,0x62};
 
     for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) hid_of[t[i].code] = t[i].usage;
-    for (int i = 0; i < 10; i++) { hid_of[2 + i] = 0x1E + i; hid_of[59 + i] = 0x3A + i; }   // 1..0、F1..F10
+    for (int i = 0; i < 10; i++) { hid_of[2 + i] = 0x1E + i; hid_of[59 + i] = 0x3A + i; }   // 1..0, F1..F10
     for (int i = 0; i < 10; i++) hid_of[16 + i] = q[i];
     for (int i = 0; i < 9; i++)  hid_of[30 + i] = a[i];
     for (int i = 0; i < 7; i++)  hid_of[44 + i] = z[i];
@@ -50,31 +46,85 @@ static void init_map(void) {
     mod_of[97] = 0x10; mod_of[54] = 0x20; mod_of[100] = 0x40; mod_of[126] = 0x80;
 }
 
-static int emit(unsigned char mods, const unsigned char *keys, int n) {
+static int emit_keyboard(unsigned char mods, const unsigned char *keys, int n) {
     unsigned char r[8] = { mods, 0 };
     for (int i = 0; i < n && i < 6; i++) r[2 + i] = keys[i];
-    return write(1, r, sizeof r) == (ssize_t)sizeof r ? 0 : -1;    // 8 位元組，管線寫入不會被拆開
+    return write(1, r, sizeof r) == (ssize_t)sizeof r ? 0 : -1;    // 8 bytes atomic pipe write
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s /dev/input/eventN\n", argv[0]);
-        return 2;
+static int clamp127(int v) {
+    if (v > 127) return 127;
+    if (v < -127) return -127;
+    return v;
+}
+
+static int emit_mouse_frame(unsigned char buttons, int *dx, int *dy, int *wheel, int *btn_dirty) {
+    while (*btn_dirty || *dx != 0 || *dy != 0 || *wheel != 0) {
+        int cx = clamp127(*dx);
+        int cy = clamp127(*dy);
+        int cw = clamp127(*wheel);
+        unsigned char r[4] = {
+            buttons,
+            (unsigned char)(signed char)cx,
+            (unsigned char)(signed char)cy,
+            (unsigned char)(signed char)cw
+        };
+        if (write(1, r, sizeof r) != (ssize_t)sizeof r) return -1;
+        *dx -= cx;
+        *dy -= cy;
+        *wheel -= cw;
+        *btn_dirty = 0;
     }
+    return 0;
+}
+
+static int run_mouse_loop(int fd) {
+    unsigned char buttons = 0;
+    int dx = 0, dy = 0, wheel = 0;
+    int btn_dirty = 0;
+    int rc = 0;
+    struct input_event ev;
+
+    while (!stop_flag) {
+        ssize_t r = read(fd, &ev, sizeof ev);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            rc = 1;
+            break;
+        }
+        if (r != (ssize_t)sizeof ev) continue;
+
+        if (ev.type == EV_REL) {
+            if (ev.code == REL_X) dx += ev.value;
+            else if (ev.code == REL_Y) dy += ev.value;
+            else if (ev.code == REL_WHEEL) wheel += ev.value;
+        } else if (ev.type == EV_KEY && ev.value != 2) {
+            unsigned char mask = 0;
+            if (ev.code == BTN_LEFT) mask = 0x01;
+            else if (ev.code == BTN_RIGHT) mask = 0x02;
+            else if (ev.code == BTN_MIDDLE) mask = 0x04;
+            else if (ev.code == BTN_SIDE) mask = 0x08;
+            else if (ev.code == BTN_EXTRA) mask = 0x10;
+
+            if (mask != 0) {
+                unsigned char next = (ev.value == 1) ? (buttons | mask) : (buttons & (unsigned char)~mask);
+                if (next != buttons) {
+                    buttons = next;
+                    btn_dirty = 1;
+                }
+            }
+        } else if (ev.type == EV_SYN && ev.code == SYN_REPORT) {
+            if (emit_mouse_frame(buttons, &dx, &dy, &wheel, &btn_dirty) < 0) break;
+        }
+    }
+
+    unsigned char release[4] = { 0, 0, 0, 0 };
+    (void)write(1, release, sizeof release);
+    return rc;
+}
+
+static int run_keyboard_loop(int fd) {
     init_map();
-
-    struct sigaction sa;
-    memset(&sa, 0, sizeof sa);
-    sa.sa_handler = on_signal;          // 不設 SA_RESTART，讓 read() 能被訊號中斷
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGHUP, &sa, NULL);
-    signal(SIGPIPE, SIG_IGN);
-
-    int fd = open(argv[1], O_RDONLY);
-    if (fd < 0) { perror("open"); return 1; }
-    if (ioctl(fd, EVIOCGRAB, (void *)1) < 0) { perror("EVIOCGRAB"); close(fd); return 1; }
-
     unsigned char mods = 0, keys[6];
     int n = 0, rc = 0;
     struct input_event ev;
@@ -83,11 +133,11 @@ int main(int argc, char **argv) {
         ssize_t r = read(fd, &ev, sizeof ev);
         if (r < 0) {
             if (errno == EINTR) continue;
-            rc = 1;                      // 多半是 ENODEV：鍵盤被拔掉
+            rc = 1;
             break;
         }
         if (r != (ssize_t)sizeof ev) continue;
-        if (ev.type != EV_KEY || ev.value == 2 || ev.code > 255) continue;   // 忽略自動重複
+        if (ev.type != EV_KEY || ev.value == 2 || ev.code > 255) continue;
         int down = (ev.value == 1);
 
         if (mod_of[ev.code]) {
@@ -102,11 +152,42 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        if (down && ev.code == KEY_Q && (mods & 0x05) == 0x05) break;   // Ctrl+Alt+Q：結束並釋放鍵盤
-        if (emit(mods, keys, n) < 0) break;                              // stdout 被關閉
+        if (down && ev.code == KEY_Q && (mods & 0x05) == 0x05) break;
+        if (emit_keyboard(mods, keys, n) < 0) break;
     }
 
-    emit(0, keys, 0);                    // 放開所有按鍵
+    emit_keyboard(0, keys, 0);
+    return rc;
+}
+
+int main(int argc, char **argv) {
+    int mouse_mode = 0;
+    const char *dev_path = NULL;
+
+    if (argc == 2) {
+        dev_path = argv[1];
+    } else if (argc >= 3 && strcmp(argv[1], "--mouse") == 0) {
+        mouse_mode = 1;
+        dev_path = argv[2];
+    } else {
+        fprintf(stderr, "usage: %s [--mouse] /dev/input/eventN\n", argv[0]);
+        return 2;
+    }
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_signal;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
+    signal(SIGPIPE, SIG_IGN);
+
+    int fd = open(dev_path, O_RDONLY);
+    if (fd < 0) { perror("open"); return 1; }
+    if (ioctl(fd, EVIOCGRAB, (void *)1) < 0) { perror("EVIOCGRAB"); close(fd); return 1; }
+
+    int rc = mouse_mode ? run_mouse_loop(fd) : run_keyboard_loop(fd);
+
     ioctl(fd, EVIOCGRAB, (void *)0);
     close(fd);
     return rc;

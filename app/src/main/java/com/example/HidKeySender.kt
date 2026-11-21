@@ -71,10 +71,10 @@ class HidKeySender(
         val pressedKeys = LinkedHashSet<Byte>()
     }
 
-    private val sourceStates = ConcurrentHashMap<KeySource, SourceState>().apply {
-        put(KeySource.USB, SourceState())
-        put(KeySource.SOFT_KEYBOARD, SourceState())
-        put(KeySource.TEST, SourceState())
+    private val sourceStates = ConcurrentHashMap<String, SourceState>().apply {
+        put(KeySource.USB.name, SourceState())
+        put(KeySource.SOFT_KEYBOARD.name, SourceState())
+        put(KeySource.TEST.name, SourceState())
     }
 
     private val stateLock = Any()
@@ -161,12 +161,19 @@ class HidKeySender(
     }
 
     /**
-     * Updates key state for the given source and enqueues the merged HID report.
+     * Updates key state for the given source enum and enqueues the merged HID report.
      */
     fun updateSourceKeys(source: KeySource, modifiers: Byte, keys: Set<Byte>) {
+        updateSourceKeys(source.name, modifiers, keys)
+    }
+
+    /**
+     * Updates key state for an arbitrary per-device source ID and enqueues the merged HID report.
+     */
+    fun updateSourceKeys(sourceId: String, modifiers: Byte, keys: Set<Byte>) {
         val mergedReport: ByteArray
         synchronized(stateLock) {
-            val state = sourceStates.getOrPut(source) { SourceState() }
+            val state = sourceStates.getOrPut(sourceId) { SourceState() }
             state.modifiers = modifiers
             state.pressedKeys.clear()
             state.pressedKeys.addAll(keys)
@@ -180,10 +187,17 @@ class HidKeySender(
      * Updates source state directly from an 8-byte boot keyboard report [modifier, 0, key1..key6] (used by evgrab).
      */
     fun sendRawReport(source: KeySource, report8: ByteArray) {
+        sendRawReport(source.name, report8)
+    }
+
+    /**
+     * Updates per-device source state directly from an 8-byte boot keyboard report [modifier, 0, key1..key6].
+     */
+    fun sendRawReport(sourceId: String, report8: ByteArray) {
         if (report8.size < 8) return
         val mergedReport: ByteArray
         synchronized(stateLock) {
-            val state = sourceStates.getOrPut(source) { SourceState() }
+            val state = sourceStates.getOrPut(sourceId) { SourceState() }
             state.modifiers = report8[0]
             state.pressedKeys.clear()
             for (i in 2..7) {
@@ -198,15 +212,52 @@ class HidKeySender(
     }
 
     /**
-     * Releases all active keys for the specified source.
+     * Releases all active keys for the specified source enum.
      */
     fun clearSource(source: KeySource) {
+        clearSource(source.name)
+    }
+
+    /**
+     * Releases all active keys for the specified source ID.
+     */
+    fun clearSource(sourceId: String) {
         val mergedReport: ByteArray
         synchronized(stateLock) {
-            val state = sourceStates[source]
+            val state = sourceStates[sourceId]
             if (state != null) {
                 state.modifiers = 0
                 state.pressedKeys.clear()
+            }
+            mergedReport = computeMergedReport()
+        }
+        reportChannel.trySend(mergedReport)
+    }
+
+    /**
+     * Releases all active keys for a dynamic source ID and removes its state entry (e.g. on USB unplug).
+     */
+    fun removeSource(sourceId: String) {
+        val mergedReport: ByteArray
+        synchronized(stateLock) {
+            sourceStates.remove(sourceId)
+            mergedReport = computeMergedReport()
+        }
+        reportChannel.trySend(mergedReport)
+    }
+
+    /**
+     * Releases all active keys whose sourceId starts with the given prefix.
+     */
+    fun clearSourcesWithPrefix(prefix: String) {
+        val mergedReport: ByteArray
+        synchronized(stateLock) {
+            val it = sourceStates.entries.iterator()
+            while (it.hasNext()) {
+                val entry = it.next()
+                if (entry.key.startsWith(prefix)) {
+                    it.remove()
+                }
             }
             mergedReport = computeMergedReport()
         }
@@ -231,9 +282,13 @@ class HidKeySender(
      * Sends a press-and-release keystroke sequentially inside the caller's coroutine.
      */
     suspend fun sendStroke(source: KeySource, modifier: Byte, keycode: Byte, delayMs: Long = 15L) {
-        updateSourceKeys(source, modifier, setOf(keycode))
+        sendStroke(source.name, modifier, keycode, delayMs)
+    }
+
+    suspend fun sendStroke(sourceId: String, modifier: Byte, keycode: Byte, delayMs: Long = 15L) {
+        updateSourceKeys(sourceId, modifier, setOf(keycode))
         delay(delayMs)
-        updateSourceKeys(source, 0, emptySet())
+        updateSourceKeys(sourceId, 0, emptySet())
         delay(delayMs)
     }
 

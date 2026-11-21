@@ -113,7 +113,22 @@ enum class LogKey {
     WACOM_OPEN_FAILED,
     WACOM_CLAIM_FAILED,
     WACOM_MODE_UNLOCKED,
-    WACOM_UNHANDLED_REPORT
+    WACOM_UNHANDLED_REPORT,
+
+    // Evgrab Mouse & Multi-OTG Mouse USB Host
+    EVGRAB_LOCKED_MICE,
+    EVGRAB_MOUSE_LISTENING,
+    MOUSE_USB_PERMISSION_GRANTED,
+    MOUSE_USB_PERMISSION_DENIED,
+    MOUSE_DEVICE_DETECTED,
+    MOUSE_DEVICE_DETACHED,
+    MOUSE_SENSITIVITY_CHANGED,
+    MOUSE_STARTING,
+    MOUSE_NO_DEVICE_WAITING,
+    MOUSE_STOPPED,
+    MOUSE_REQUESTING_USB_PERMISSION,
+    MOUSE_OPEN_FAILED,
+    MOUSE_READER_ACTIVE
 }
 
 object LogLocalizer {
@@ -225,6 +240,7 @@ object LogLocalizer {
             HidProfileMode.COMBO.name -> strings.hidProfileCombo
             HidProfileMode.WACOM_PEN.name -> strings.hidProfileWacom
             HidProfileMode.KEYBOARD.name -> strings.hidProfileKeyboard
+            HidProfileMode.MOUSE.name -> strings.hidProfileMouse
             else -> modeName
         }
     }
@@ -265,7 +281,7 @@ object LogLocalizer {
         LogKey.BT_POWERED_ON -> "System Bluetooth turned on, re-initializing HID Profile..."
         LogKey.BT_POWERED_OFF -> "System Bluetooth turned off"
         LogKey.BT_BONDING -> "Pairing with target device [${str(a, 0)}]..."
-        LogKey.BT_BONDED -> ">>> Pairing completed [${str(a, 0)}]! If it does not connect automatically, tap this device on the target or tap Pair / Connect"
+        LogKey.BT_BONDED -> ">>> Pairing completed [${str(a, 0)}]! If it does not connect automatically, connect from the target device's Bluetooth menu"
         LogKey.BT_UNBONDED -> "Target device [${str(a, 0)}] unpaired"
         LogKey.REPORT_ID_SWITCHED -> "Switched HID Report ID mode: ${reportIdModeName(AppLanguage.EN, str(a, 0))}"
         LogKey.REPORT_ID_RESYNC_WARN -> "Re-registered SDP descriptor for new mode; if a paired target still does not respond, unpair on both devices and reconnect"
@@ -361,6 +377,19 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] Failed to claim USB HID interface ${intArg(a, 0)}"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] ${str(a, 0)} pen mode active (feature ctrl=${intArg(a, 1)}), streaming via BT HID"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] Unhandled report id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] Locked ${intArg(a, 0)} mouse/mice: ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] Mouse exclusive grab active: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[Mouse] USB permission granted: ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[Mouse] USB permission denied: ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[Mouse] USB mouse attached: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[Mouse] USB mouse detached: ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[Mouse] Sensitivity set to ${str(a, 0)}"
+        LogKey.MOUSE_STARTING -> "[Mouse] Starting multi-OTG USB mouse relay..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[Mouse] No USB mouse attached, waiting for OTG connection..."
+        LogKey.MOUSE_STOPPED -> "[Mouse] USB mouse relay stopped"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[Mouse] Requesting USB Host permission: ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[Mouse] Failed to open USB mouse: ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[Mouse] Active USB OTG reader: ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 
     private fun formatZhTw(key: LogKey, a: Array<out Any>): String = when (key) {
@@ -370,7 +399,7 @@ object LogLocalizer {
         LogKey.BT_POWERED_ON -> "系統藍牙已開啟，重新初始化 HID Profile..."
         LogKey.BT_POWERED_OFF -> "系統藍牙已關閉"
         LogKey.BT_BONDING -> "正在與目標裝置 [${str(a, 0)}] 配對中..."
-        LogKey.BT_BONDED -> ">>> 配對完成 [${str(a, 0)}]！若目標裝置未自動連線，請在目標端藍牙列表點擊本機，或按『配對 / 連線目標』"
+        LogKey.BT_BONDED -> ">>> 配對完成 [${str(a, 0)}]！若目標裝置未自動連線，請由目標裝置端藍牙列表點擊本機進行連線"
         LogKey.BT_UNBONDED -> "目標裝置 [${str(a, 0)}] 已解除配對"
         LogKey.REPORT_ID_SWITCHED -> "切換 HID Report ID 模式: ${reportIdModeName(AppLanguage.ZH_TW, str(a, 0))}"
         LogKey.REPORT_ID_RESYNC_WARN -> "已依新模式重新註冊 SDP 描述檔；若目標裝置先前已配對且仍無反應，請在雙方藍牙設定取消配對後重連"
@@ -466,6 +495,19 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] 無法獨占 USB HID 介面 ${intArg(a, 0)}"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] ${str(a, 0)} 壓感模式已啟用 (ctrl=${intArg(a, 1)})，開始轉發至藍牙 HID"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] 未處理報告 id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] 已獨占鎖定 ${intArg(a, 0)} 支滑鼠: ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] 滑鼠獨占模式運作中: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[滑鼠] USB 權限已授予: ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[滑鼠] USB 權限被拒絕: ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[滑鼠] 偵測到 USB 滑鼠: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[滑鼠] USB 滑鼠已拔除: ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[滑鼠] 靈敏度調整為 ${str(a, 0)}"
+        LogKey.MOUSE_STARTING -> "[滑鼠] 正在啟動多裝置 USB OTG 滑鼠轉發..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[滑鼠] 未偵測到 USB 滑鼠，等待 OTG 插入..."
+        LogKey.MOUSE_STOPPED -> "[滑鼠] USB 滑鼠轉發已停止"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[滑鼠] 正在請求 USB Host 權限: ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[滑鼠] 無法開啟 USB 滑鼠: ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[滑鼠] USB OTG 讀取運作中: ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 
     private fun formatZhCn(key: LogKey, a: Array<out Any>): String = when (key) {
@@ -475,7 +517,7 @@ object LogLocalizer {
         LogKey.BT_POWERED_ON -> "系统蓝牙已开启，重新初始化 HID Profile..."
         LogKey.BT_POWERED_OFF -> "系统蓝牙已关闭"
         LogKey.BT_BONDING -> "正在与目标设备 [${str(a, 0)}] 配对中..."
-        LogKey.BT_BONDED -> ">>> 配对完成 [${str(a, 0)}]！若目标设备未自动连接，请在目标端蓝牙列表点击本机，或按“配对 / 连接目标”"
+        LogKey.BT_BONDED -> ">>> 配对完成 [${str(a, 0)}]！若目标设备未自动连接，请在目标设备蓝牙列表点击本机进行连接"
         LogKey.BT_UNBONDED -> "目标设备 [${str(a, 0)}] 已取消配对"
         LogKey.REPORT_ID_SWITCHED -> "切换 HID Report ID 模式: ${reportIdModeName(AppLanguage.ZH_CN, str(a, 0))}"
         LogKey.REPORT_ID_RESYNC_WARN -> "已按新模式重新注册 SDP 描述文件；若目标设备此前已配对且仍无反应，请在双方蓝牙设置取消配对后重连"
@@ -571,6 +613,19 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] 无法独占 USB HID 接口 ${intArg(a, 0)}"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] ${str(a, 0)} 压感模式已启用 (ctrl=${intArg(a, 1)})，开始转发至蓝牙 HID"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] 未处理报告 id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] 已独占锁定 ${intArg(a, 0)} 个鼠标: ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] 鼠标独占模式运行中: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[鼠标] USB 权限已授予: ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[鼠标] USB 权限被拒绝: ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[鼠标] 检测到 USB 鼠标: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[鼠标] USB 鼠标已拔出: ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[鼠标] 灵敏度调整为 ${str(a, 0)}"
+        LogKey.MOUSE_STARTING -> "[鼠标] 正在启动多设备 USB OTG 鼠标转发..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[鼠标] 未检测到 USB 鼠标，等待 OTG 插入..."
+        LogKey.MOUSE_STOPPED -> "[鼠标] USB 鼠标转发已停止"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[鼠标] 正在请求 USB Host 权限: ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[鼠标] 无法打开 USB 鼠标: ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[鼠标] USB OTG 读取运行中: ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 
     private fun formatJa(key: LogKey, a: Array<out Any>): String = when (key) {
@@ -580,7 +635,7 @@ object LogLocalizer {
         LogKey.BT_POWERED_ON -> "Bluetooth がオンになりました。HID プロファイルを再初期化します..."
         LogKey.BT_POWERED_OFF -> "システム Bluetooth がオフになりました"
         LogKey.BT_BONDING -> "ターゲット [${str(a, 0)}] とペアリング中..."
-        LogKey.BT_BONDED -> ">>> ペアリング完了 [${str(a, 0)}]！自動接続されない場合はターゲット側から接続するか「ペアリング / 接続」を押してください"
+        LogKey.BT_BONDED -> ">>> ペアリング完了 [${str(a, 0)}]！自動接続されない場合はターゲット端末側から接続してください"
         LogKey.BT_UNBONDED -> "ターゲット [${str(a, 0)}] のペアリングを解除しました"
         LogKey.REPORT_ID_SWITCHED -> "HID Report ID モード切替: ${reportIdModeName(AppLanguage.JA, str(a, 0))}"
         LogKey.REPORT_ID_RESYNC_WARN -> "新モードで SDP を再登録しました。既にペアリング済みの端末が反応しない場合は双方のペアリングを削除して再接続してください"
@@ -676,6 +731,19 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] USB HID インターフェース ${intArg(a, 0)} を確保できません"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] ${str(a, 0)} 筆圧モード有効化 (ctrl=${intArg(a, 1)})、BT HID 転送開始"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] 未処理レポート id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] ${intArg(a, 0)} 台のマウスを排他ロック: ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] マウス排他キャプチャ稼働中: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[マウス] USB 許可を取得しました: ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[マウス] USB 許可が拒否されました: ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[マウス] USB マウスを検出: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[マウス] USB マウスが切断されました: ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[マウス] 感度を ${str(a, 0)} に設定しました"
+        LogKey.MOUSE_STARTING -> "[マウス] マルチ OTG USB マウスリレーを開始中..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[マウス] USB マウス未接続、OTG 接続を待機中..."
+        LogKey.MOUSE_STOPPED -> "[マウス] USB マウスリレーを停止しました"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[マウス] USB Host 権限を要求中: ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[マウス] USB マウスを開けませんでした: ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[マウス] USB OTG 読み取り稼働中: ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 
     private fun formatKo(key: LogKey, a: Array<out Any>): String = when (key) {
@@ -685,7 +753,7 @@ object LogLocalizer {
         LogKey.BT_POWERED_ON -> "시스템 블루투스가 켜졌습니다. HID 프로필을 다시 초기화합니다..."
         LogKey.BT_POWERED_OFF -> "시스템 블루투스가 꺼졌습니다"
         LogKey.BT_BONDING -> "대상 기기 [${str(a, 0)}] 와 페어링 중..."
-        LogKey.BT_BONDED -> ">>> 페어링 완료 [${str(a, 0)}]! 자동 연결되지 않으면 대상 기기에서 연결하거나 페어링/연결 버튼을 누르세요"
+        LogKey.BT_BONDED -> ">>> 페어링 완료 [${str(a, 0)}]! 자동 연결되지 않으면 대상 기기의 블루투스 메뉴에서 연결하세요"
         LogKey.BT_UNBONDED -> "대상 기기 [${str(a, 0)}] 페어링 해제됨"
         LogKey.REPORT_ID_SWITCHED -> "HID Report ID 모드 전환: ${reportIdModeName(AppLanguage.KO, str(a, 0))}"
         LogKey.REPORT_ID_RESYNC_WARN -> "새 모드로 SDP를 재등록했습니다. 기존 페어링 기기가 반응하지 않으면 양쪽에서 페어링을 해제한 뒤 다시 연결하세요"
@@ -781,6 +849,19 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] USB HID 인터페이스 ${intArg(a, 0)} 점유 실패"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] ${str(a, 0)} 필압 모드 활성화 (ctrl=${intArg(a, 1)}), BT HID 전송 시작"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] 미처리 리포트 id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] 마우스 ${intArg(a, 0)}대 독점 잠금: ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] 마우스 독점 캡처 활성: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[마우스] USB 권한 허용됨: ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[마우스] USB 권한 거부됨: ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[마우스] USB 마우스 연결됨: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[마우스] USB 마우스 분리됨: ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[마우스] 감도를 ${str(a, 0)}(으)로 설정"
+        LogKey.MOUSE_STARTING -> "[마우스] 멀티 OTG USB 마우스 릴레이 시작 중..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[마우스] USB 마우스 없음, OTG 연결 대기 중..."
+        LogKey.MOUSE_STOPPED -> "[마우스] USB 마우스 릴레이 중지됨"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[마우스] USB Host 권한 요청 중: ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[마우스] USB 마우스를 열지 못함: ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[마우스] USB OTG 리더 활성: ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 
     private fun formatEs(key: LogKey, a: Array<out Any>): String = when (key) {
@@ -886,6 +967,19 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] No se pudo reclamar la interfaz USB HID ${intArg(a, 0)}"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] Modo lápiz activo en ${str(a, 0)} (ctrl=${intArg(a, 1)}), transmitiendo vía BT HID"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] Informe no manejado id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] ${intArg(a, 0)} ratón/ratones bloqueados: ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] Captura exclusiva de ratón activa: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[Ratón] Permiso USB concedido: ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[Ratón] Permiso USB denegado: ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[Ratón] Ratón USB conectado: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[Ratón] Ratón USB desconectado: ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[Ratón] Sensibilidad ajustada a ${str(a, 0)}"
+        LogKey.MOUSE_STARTING -> "[Ratón] Iniciando relé multi-OTG de ratón USB..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[Ratón] Sin ratón USB conectado, esperando OTG..."
+        LogKey.MOUSE_STOPPED -> "[Ratón] Relé de ratón USB detenido"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[Ratón] Solicitando permiso USB Host: ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[Ratón] Error al abrir ratón USB: ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[Ratón] Lector USB OTG activo: ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 
     private fun formatFr(key: LogKey, a: Array<out Any>): String = when (key) {
@@ -991,6 +1085,19 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] Échec de réservation de l'interface USB HID ${intArg(a, 0)}"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] Mode stylet actif sur ${str(a, 0)} (ctrl=${intArg(a, 1)}), diffusion BT HID"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] Rapport ignoré id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] ${intArg(a, 0)} souris verrouillée(s) : ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] Capture exclusive souris active : ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[Souris] Permission USB accordée : ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[Souris] Permission USB refusée : ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[Souris] Souris USB détectée : ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[Souris] Souris USB débranchée : ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[Souris] Sensibilité réglée à ${str(a, 0)}"
+        LogKey.MOUSE_STARTING -> "[Souris] Démarrage du relais souris USB multi-OTG..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[Souris] Aucune souris USB détectée, en attente OTG..."
+        LogKey.MOUSE_STOPPED -> "[Souris] Relais souris USB arrêté"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[Souris] Demande de permission USB Host : ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[Souris] Échec d'ouverture souris USB : ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[Souris] Lecteur USB OTG actif : ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 
     private fun formatDe(key: LogKey, a: Array<out Any>): String = when (key) {
@@ -1096,6 +1203,19 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] USB HID-Schnittstelle ${intArg(a, 0)} nicht beanspruchbar"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] ${str(a, 0)} Stiftmodus aktiv (ctrl=${intArg(a, 1)}), Stream über BT HID"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] Unbekannter Report id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] ${intArg(a, 0)} Maus/Mäuse gesperrt: ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] Exklusive Mauserfassung aktiv: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[Maus] USB-Berechtigung erteilt: ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[Maus] USB-Berechtigung verweigert: ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[Maus] USB-Maus erkannt: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[Maus] USB-Maus getrennt: ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[Maus] Empfindlichkeit auf ${str(a, 0)} gesetzt"
+        LogKey.MOUSE_STARTING -> "[Maus] Starte Multi-OTG USB-Maus-Relay..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[Maus] Keine USB-Maus erkannt, warte auf OTG..."
+        LogKey.MOUSE_STOPPED -> "[Maus] USB-Maus-Relay gestoppt"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[Maus] Fordere USB-Host-Berechtigung an: ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[Maus] USB-Maus konnte nicht geöffnet werden: ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[Maus] USB-OTG-Leser aktiv: ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 
     private fun formatRu(key: LogKey, a: Array<out Any>): String = when (key) {
@@ -1201,6 +1321,19 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] Не удалось захватить USB HID интерфейс ${intArg(a, 0)}"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] Режим пера активен на ${str(a, 0)} (ctrl=${intArg(a, 1)}), передача по BT HID"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] Неизвестный отчёт id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] Захвачено мышей (${intArg(a, 0)}): ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] Эксклюзивный захват мыши: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[Мышь] Доступ USB разрешён: ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[Мышь] Доступ USB отклонён: ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[Мышь] Подключена USB-мышь: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[Мышь] USB-мышь отключена: ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[Мышь] Чувствительность: ${str(a, 0)}"
+        LogKey.MOUSE_STARTING -> "[Мышь] Запуск мульти-OTG реле USB-мыши..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[Мышь] USB-мышь не найдена, ожидание OTG..."
+        LogKey.MOUSE_STOPPED -> "[Мышь] Реле USB-мыши остановлено"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[Мышь] Запрос разрешения USB Host: ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[Мышь] Ошибка открытия USB-мыши: ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[Мышь] Активный USB OTG поток: ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 
     private fun formatPt(key: LogKey, a: Array<out Any>): String = when (key) {
@@ -1306,5 +1439,18 @@ object LogLocalizer {
         LogKey.WACOM_CLAIM_FAILED -> "[Wacom] Falha ao reivindicar interface USB HID ${intArg(a, 0)}"
         LogKey.WACOM_MODE_UNLOCKED -> "[Wacom] Modo caneta ativo em ${str(a, 0)} (ctrl=${intArg(a, 1)}), enviando via BT HID"
         LogKey.WACOM_UNHANDLED_REPORT -> "[Wacom] Relatório ignorado id=${str(a, 0)} [${str(a, 1)}]"
+        LogKey.EVGRAB_LOCKED_MICE -> "[evgrab] ${intArg(a, 0)} rato(s)/mouse(s) bloqueado(s): ${str(a, 1)}"
+        LogKey.EVGRAB_MOUSE_LISTENING -> "[evgrab] Captura exclusiva de mouse ativa: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_USB_PERMISSION_GRANTED -> "[Mouse] Permissão USB concedida: ${str(a, 0)}"
+        LogKey.MOUSE_USB_PERMISSION_DENIED -> "[Mouse] Permissão USB negada: ${str(a, 0)}"
+        LogKey.MOUSE_DEVICE_DETECTED -> "[Mouse] Mouse USB conectado: ${str(a, 0)} (${str(a, 1)})"
+        LogKey.MOUSE_DEVICE_DETACHED -> "[Mouse] Mouse USB desconectado: ${str(a, 0)}"
+        LogKey.MOUSE_SENSITIVITY_CHANGED -> "[Mouse] Sensibilidade definida para ${str(a, 0)}"
+        LogKey.MOUSE_STARTING -> "[Mouse] Iniciando relé USB OTG multi-dispositivo..."
+        LogKey.MOUSE_NO_DEVICE_WAITING -> "[Mouse] Nenhum mouse USB detectado, aguardando OTG..."
+        LogKey.MOUSE_STOPPED -> "[Mouse] Relé de mouse USB parado"
+        LogKey.MOUSE_REQUESTING_USB_PERMISSION -> "[Mouse] Solicitando permissão USB Host: ${str(a, 0)}"
+        LogKey.MOUSE_OPEN_FAILED -> "[Mouse] Falha ao abrir mouse USB: ${str(a, 0)}"
+        LogKey.MOUSE_READER_ACTIVE -> "[Mouse] Leitor USB OTG ativo: ${str(a, 0)} (intf=${intArg(a, 1)})"
     }
 }

@@ -1,9 +1,10 @@
-// evgrab: Exclusively grabs a USB keyboard via EVIOCGRAB and writes 8-byte HID boot keyboard reports to stdout.
-//   Report layout: [modifier, 0, key1..key6]
-//   Usage: evgrab /dev/input/eventN (requires root)
-//   Exit: SIGTERM / SIGINT, closed stdout, device unplugged, or Ctrl+Alt+Q hotkey
-//   Exit code: 0 = user pressed Ctrl+Alt+Q or received stop signal; non-zero = error or unplugged
-//   Closing fd on exit releases EVIOCGRAB in the kernel so the phone resumes normal keyboard input.
+// evgrab: Exclusively grabs a USB keyboard or mouse via EVIOCGRAB and writes HID reports to stdout.
+//   Keyboard mode (default): evgrab /dev/input/eventN
+//     8-byte Boot Keyboard reports: [modifier, 0, key1..key6]
+//     Exit hotkey: Ctrl+Alt+Q (exit code 0)
+//   Mouse mode: evgrab --mouse /dev/input/eventN
+//     4-byte Mouse reports: [buttons(5-bit), dx(int8), dy(int8), wheel(int8)]
+//   Closing fd on exit releases EVIOCGRAB in the kernel so the phone resumes normal input.
 
 #include <errno.h>
 #include <fcntl.h>
@@ -45,31 +46,85 @@ static void init_map(void) {
     mod_of[97] = 0x10; mod_of[54] = 0x20; mod_of[100] = 0x40; mod_of[126] = 0x80;
 }
 
-static int emit(unsigned char mods, const unsigned char *keys, int n) {
+static int emit_keyboard(unsigned char mods, const unsigned char *keys, int n) {
     unsigned char r[8] = { mods, 0 };
     for (int i = 0; i < n && i < 6; i++) r[2 + i] = keys[i];
     return write(1, r, sizeof r) == (ssize_t)sizeof r ? 0 : -1;    // 8 bytes atomic pipe write
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s /dev/input/eventN\n", argv[0]);
-        return 2;
+static int clamp127(int v) {
+    if (v > 127) return 127;
+    if (v < -127) return -127;
+    return v;
+}
+
+static int emit_mouse_frame(unsigned char buttons, int *dx, int *dy, int *wheel, int *btn_dirty) {
+    while (*btn_dirty || *dx != 0 || *dy != 0 || *wheel != 0) {
+        int cx = clamp127(*dx);
+        int cy = clamp127(*dy);
+        int cw = clamp127(*wheel);
+        unsigned char r[4] = {
+            buttons,
+            (unsigned char)(signed char)cx,
+            (unsigned char)(signed char)cy,
+            (unsigned char)(signed char)cw
+        };
+        if (write(1, r, sizeof r) != (ssize_t)sizeof r) return -1;
+        *dx -= cx;
+        *dy -= cy;
+        *wheel -= cw;
+        *btn_dirty = 0;
     }
+    return 0;
+}
+
+static int run_mouse_loop(int fd) {
+    unsigned char buttons = 0;
+    int dx = 0, dy = 0, wheel = 0;
+    int btn_dirty = 0;
+    int rc = 0;
+    struct input_event ev;
+
+    while (!stop_flag) {
+        ssize_t r = read(fd, &ev, sizeof ev);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            rc = 1;
+            break;
+        }
+        if (r != (ssize_t)sizeof ev) continue;
+
+        if (ev.type == EV_REL) {
+            if (ev.code == REL_X) dx += ev.value;
+            else if (ev.code == REL_Y) dy += ev.value;
+            else if (ev.code == REL_WHEEL) wheel += ev.value;
+        } else if (ev.type == EV_KEY && ev.value != 2) {
+            unsigned char mask = 0;
+            if (ev.code == BTN_LEFT) mask = 0x01;
+            else if (ev.code == BTN_RIGHT) mask = 0x02;
+            else if (ev.code == BTN_MIDDLE) mask = 0x04;
+            else if (ev.code == BTN_SIDE) mask = 0x08;
+            else if (ev.code == BTN_EXTRA) mask = 0x10;
+
+            if (mask != 0) {
+                unsigned char next = (ev.value == 1) ? (buttons | mask) : (buttons & (unsigned char)~mask);
+                if (next != buttons) {
+                    buttons = next;
+                    btn_dirty = 1;
+                }
+            }
+        } else if (ev.type == EV_SYN && ev.code == SYN_REPORT) {
+            if (emit_mouse_frame(buttons, &dx, &dy, &wheel, &btn_dirty) < 0) break;
+        }
+    }
+
+    unsigned char release[4] = { 0, 0, 0, 0 };
+    (void)write(1, release, sizeof release);
+    return rc;
+}
+
+static int run_keyboard_loop(int fd) {
     init_map();
-
-    struct sigaction sa;
-    memset(&sa, 0, sizeof sa);
-    sa.sa_handler = on_signal;          // Do not set SA_RESTART so read() wakes immediately on signal
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGHUP, &sa, NULL);
-    signal(SIGPIPE, SIG_IGN);
-
-    int fd = open(argv[1], O_RDONLY);
-    if (fd < 0) { perror("open"); return 1; }
-    if (ioctl(fd, EVIOCGRAB, (void *)1) < 0) { perror("EVIOCGRAB"); close(fd); return 1; }
-
     unsigned char mods = 0, keys[6];
     int n = 0, rc = 0;
     struct input_event ev;
@@ -98,10 +153,41 @@ int main(int argc, char **argv) {
         }
 
         if (down && ev.code == KEY_Q && (mods & 0x05) == 0x05) break;   // Ctrl+Alt+Q: stop and release grab
-        if (emit(mods, keys, n) < 0) break;                              // stdout closed
+        if (emit_keyboard(mods, keys, n) < 0) break;                     // stdout closed
     }
 
-    emit(0, keys, 0);                    // Release all keys
+    emit_keyboard(0, keys, 0);           // Release all keys
+    return rc;
+}
+
+int main(int argc, char **argv) {
+    int mouse_mode = 0;
+    const char *dev_path = NULL;
+
+    if (argc == 2) {
+        dev_path = argv[1];
+    } else if (argc >= 3 && strcmp(argv[1], "--mouse") == 0) {
+        mouse_mode = 1;
+        dev_path = argv[2];
+    } else {
+        fprintf(stderr, "usage: %s [--mouse] /dev/input/eventN\n", argv[0]);
+        return 2;
+    }
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_signal;          // Do not set SA_RESTART so read() wakes immediately on signal
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
+    signal(SIGPIPE, SIG_IGN);
+
+    int fd = open(dev_path, O_RDONLY);
+    if (fd < 0) { perror("open"); return 1; }
+    if (ioctl(fd, EVIOCGRAB, (void *)1) < 0) { perror("EVIOCGRAB"); close(fd); return 1; }
+
+    int rc = mouse_mode ? run_mouse_loop(fd) : run_keyboard_loop(fd);
+
     ioctl(fd, EVIOCGRAB, (void *)0);
     close(fd);
     return rc;

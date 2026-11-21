@@ -96,6 +96,10 @@ class HidForwardingTest {
             org.junit.Assert.assertTrue("sectionHidProfile blank for $lang", s.sectionHidProfile.isNotBlank())
             org.junit.Assert.assertTrue("wacomTitle blank for $lang", s.wacomTitle.isNotBlank())
             org.junit.Assert.assertTrue("wacomBtnStart blank for $lang", s.wacomBtnStart.isNotBlank())
+            org.junit.Assert.assertTrue("mouseTitle blank for $lang", s.mouseTitle.isNotBlank())
+            org.junit.Assert.assertTrue("mouseBtnStart blank for $lang", s.mouseBtnStart.isNotBlank())
+            org.junit.Assert.assertTrue("hidProfileMouse blank for $lang", s.hidProfileMouse.isNotBlank())
+            org.junit.Assert.assertTrue("connectByTargetHint blank for $lang", s.connectByTargetHint.isNotBlank())
 
             for (key in LogKey.values()) {
                 val formatted = LogLocalizer.format(lang, key, "arg0", 1, true, "arg3")
@@ -190,13 +194,19 @@ class HidForwardingTest {
     @Test
     fun wacomAndComboDescriptorsAreValid() {
         val pen = RelayManager.WACOM_PEN_REPORT_DESCRIPTOR
+        val mouse = RelayManager.MOUSE_REPORT_DESCRIPTOR
+        val mouseNoId = RelayManager.MOUSE_REPORT_DESCRIPTOR_NO_ID
         val combo = RelayManager.COMBO_REPORT_DESCRIPTOR
         assertEquals(94, pen.size)
         assertEquals(0x05.toByte(), pen[0]) // Usage Page (Digitizers)
         assertEquals(0x0D.toByte(), pen[1])
         assertEquals(0x85.toByte(), pen[6]) // Report ID (2)
         assertEquals(0x02.toByte(), pen[7])
-        assertEquals(65 + 94, combo.size)
+        assertEquals(64, mouse.size)
+        assertEquals(0x85.toByte(), mouse[6]) // Report ID (3)
+        assertEquals(0x03.toByte(), mouse[7])
+        assertEquals(62, mouseNoId.size)
+        assertEquals(65 + 94 + 64, combo.size)
     }
 
     @Test
@@ -236,5 +246,88 @@ class HidForwardingTest {
         Thread.sleep(60)
         assertArrayEquals(move2, sender.getLastReport())
         sender.shutdown()
+    }
+
+    @Test
+    fun mouseReportParserDecodesBootAndCustomDescriptorPackets() {
+        // 1) Standard 4-byte Boot Mouse packet (left+right buttons, dx=-10, dy=+25, wheel=-1)
+        val boot = byteArrayOf(0x03, (-10).toByte(), 25.toByte(), (-1).toByte())
+        val bootSample = HidMouseReportParser.parsePacket(boot, boot.size, HidMouseReportParser.bootMouseLayout())!!
+        assertEquals(0x03, bootSample.buttonsMask)
+        assertEquals(-10, bootSample.dx)
+        assertEquals(25, bootSample.dy)
+        assertEquals(-1, bootSample.wheel)
+
+        // 2) Custom HID Report Descriptor with Report ID 1, 3 buttons (3 bits + 5 pad), 16-bit X/Y, 8-bit Wheel
+        val customDesc = (
+            "05010902A101" +
+            "85010901A100" +
+            "05091901290315002501950375018102" +
+            "950175058103" +
+            "05010930093116008026FF7F751095028106" +
+            "09381581257F750895018106" +
+            "C0C0"
+        ).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+        val layout = HidMouseReportParser.parseDescriptorForMouse(customDesc)!!
+        assertEquals(1, layout.reportId)
+        // Report ID 1, btn bit1 (right=0x02), dx=300 (0x012C LE), dy=-300 (0xFED4 LE), wheel=2
+        val pkt = byteArrayOf(
+            0x01,
+            0x02,
+            0x2C, 0x01,
+            0xD4.toByte(), 0xFE.toByte(),
+            0x02
+        )
+        val parsed = HidMouseReportParser.parsePacket(pkt, pkt.size, layout)!!
+        assertEquals(0x02, parsed.buttonsMask)
+        assertEquals(300, parsed.dx)
+        assertEquals(-300, parsed.dy)
+        assertEquals(2, parsed.wheel)
+    }
+
+    @Test
+    fun mouseSenderMergesMultiSourceButtonsAndChunksLargeDeltas() {
+        val sender = HidMouseSender { _, _ -> }
+        sender.updateSourceButtons("mouse_a", 0x01)
+        sender.updateSourceButtons("mouse_b", 0x02)
+        Thread.sleep(50)
+        assertEquals(0x03.toByte(), sender.getLastReport()[0])
+
+        // Removing one mouse preserves the other mouse's held button
+        sender.removeSource("mouse_a")
+        Thread.sleep(50)
+        assertEquals(0x02.toByte(), sender.getLastReport()[0])
+
+        // Large delta is clamped per 4-byte HID frame and drains safely
+        sender.sendRelativeMove("mouse_b", null, dx = 300, dy = -200, wheel = 1)
+        Thread.sleep(80)
+        assertEquals(0x02.toByte(), sender.getLastReport()[0])
+        sender.clearMouse()
+        Thread.sleep(50)
+        assertArrayEquals(ByteArray(4), sender.getLastReport())
+        sender.shutdown()
+    }
+
+    @Test
+    fun multiKeyboardKeySenderIsolatesSources() {
+        val sender = HidKeySender { _, _ -> }
+        sender.updateSourceKeys("usb:/dev/input/event1", 0x01, setOf(0x04.toByte())) // LeftCtrl + A
+        sender.updateSourceKeys("usb:/dev/input/event2", 0x02, setOf(0x05.toByte())) // LeftShift + B
+        Thread.sleep(60)
+        val both = sender.getLastReport()
+        assertEquals(0x03.toByte(), both[0])
+        org.junit.Assert.assertTrue(both.slice(2..7).contains(0x04.toByte()))
+        org.junit.Assert.assertTrue(both.slice(2..7).contains(0x05.toByte()))
+
+        // Detaching event1 preserves event2's Shift+B
+        sender.removeSource("usb:/dev/input/event1")
+        Thread.sleep(60)
+        val afterDetach = sender.getLastReport()
+        assertEquals(0x02.toByte(), afterDetach[0])
+        org.junit.Assert.assertFalse(afterDetach.slice(2..7).contains(0x04.toByte()))
+        org.junit.Assert.assertTrue(afterDetach.slice(2..7).contains(0x05.toByte()))
+
+        sender.clearAll()
     }
 }
