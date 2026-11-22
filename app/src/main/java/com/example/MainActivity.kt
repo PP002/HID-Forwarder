@@ -28,6 +28,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -51,24 +52,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Draw
-import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.KeyboardHide
-import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Mouse
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -255,6 +243,8 @@ class MainActivity : ComponentActivity() {
                 evgrabManager.clearForegroundKeys()
             }
             if (::relayManager.isInitialized) {
+                relayManager.keySender.removeSource("fg_touchpad_page_up")
+                relayManager.keySender.removeSource("fg_touchpad_page_down")
                 relayManager.mouseSender.removeSource("fg_touchpad")
                 relayManager.mouseSender.removeSource("fg_touchpad_btn")
                 relayManager.mouseSender.removeSource("fg_capture")
@@ -317,7 +307,6 @@ fun MainScreen(
     val connectedName by relayManager.connectedDeviceName.collectAsState()
     val isSocketListening by relayManager.isSocketListening.collectAsState()
     val isClientConnected by relayManager.isClientConnected.collectAsState()
-    val reportIdMode by relayManager.reportIdMode.collectAsState()
     val hidProfileMode by relayManager.hidProfileMode.collectAsState()
     val logs by relayManager.logs.collectAsState()
 
@@ -342,6 +331,7 @@ fun MainScreen(
 
     var showBondedDialog by remember { mutableStateOf(false) }
     var permissionsGranted by remember { mutableStateOf(false) }
+    var isLanguageExpanded by remember { mutableStateOf(false) }
     var isStatusExpanded by remember { mutableStateOf(false) }
     var isConsoleExpanded by remember { mutableStateOf(true) }
     var isWacomCardExpanded by remember { mutableStateOf(false) }
@@ -432,9 +422,6 @@ fun MainScreen(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(Slate400.copy(alpha = 0.28f))
-                                .border(1.dp, Cyan400.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                                .padding(3.dp)
                         )
                         Spacer(Modifier.width(12.dp))
                         Column {
@@ -459,7 +446,7 @@ fun MainScreen(
                     Text(
                         text = strings.sectionEvgrab,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(vertical = 6.dp)
                     )
@@ -501,8 +488,8 @@ fun MainScreen(
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = when (evgrabState) {
-                                            EvgrabState.RUNNING -> Emerald400
-                                            EvgrabState.STOPPED_BY_HOTKEY -> Amber500
+                                            EvgrabState.RUNNING -> Color.White
+                                            EvgrabState.STOPPED_BY_HOTKEY -> Slate200
                                             EvgrabState.STOPPED -> Slate400
                                         },
                                         fontSize = 11.sp
@@ -533,7 +520,7 @@ fun MainScreen(
                     Text(
                         text = strings.sectionOtgHub,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(vertical = 6.dp)
                     )
@@ -556,7 +543,7 @@ fun MainScreen(
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (activeKeyboards.isNotEmpty() || combinedMouseCount > 0 || wacomCount > 0) Emerald400 else Slate400
+                                color = if (activeKeyboards.isNotEmpty() || combinedMouseCount > 0 || wacomCount > 0) Color.White else Slate400
                             )
                             val hubNames = buildList {
                                 activeKeyboards.forEach { add("KB: ${it.name}") }
@@ -585,7 +572,7 @@ fun MainScreen(
                     Text(
                         text = strings.sectionMouse,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(vertical = 6.dp)
                     )
@@ -620,8 +607,8 @@ fun MainScreen(
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = when {
-                                            combinedMouseCount > 0 || mouseState == MouseRelayState.ACTIVE -> Emerald400
-                                            mouseState == MouseRelayState.WAITING_FOR_DEVICE || mouseState == MouseRelayState.REQUESTING_PERMISSION -> Amber500
+                                            combinedMouseCount > 0 || mouseState == MouseRelayState.ACTIVE -> Color.White
+                                            mouseState == MouseRelayState.WAITING_FOR_DEVICE || mouseState == MouseRelayState.REQUESTING_PERMISSION -> Slate200
                                             else -> Slate400
                                         },
                                         fontSize = 11.sp
@@ -651,7 +638,7 @@ fun MainScreen(
                     Text(
                         text = strings.sectionWacom,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(vertical = 6.dp)
                     )
@@ -681,8 +668,8 @@ fun MainScreen(
                                         text = wacomModel?.modelName ?: strings.wacomModelNone,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = when (wacomState) {
-                                            WacomState.ACTIVE -> Emerald400
-                                            WacomState.WAITING_FOR_DEVICE, WacomState.REQUESTING_PERMISSION -> Amber500
+                                            WacomState.ACTIVE -> Color.White
+                                            WacomState.WAITING_FOR_DEVICE, WacomState.REQUESTING_PERMISSION -> Slate200
                                             WacomState.STOPPED -> Slate400
                                         },
                                         fontSize = 11.sp
@@ -712,7 +699,7 @@ fun MainScreen(
                     Text(
                         text = strings.sectionHidProfile,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(vertical = 6.dp)
                     )
@@ -744,7 +731,7 @@ fun MainScreen(
                                     Text(
                                         text = label,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = if (isSelected) Cyan400 else Slate200,
+                                        color = if (isSelected) Color.White else Slate200,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                         modifier = Modifier.weight(1f)
                                     )
@@ -763,136 +750,94 @@ fun MainScreen(
 
                     HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
 
-                    // HID Report ID Mode Selector
-                    Text(
-                        text = strings.sectionReportIdMode,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 6.dp)
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        ReportIdMode.values().forEach { mode ->
-                            val isSelected = reportIdMode == mode
-                            val modeLabel = when (mode) {
-                                ReportIdMode.AUTO -> strings.reportIdAuto
-                                ReportIdMode.FORCE_1 -> strings.reportIdForce1
-                                ReportIdMode.FORCE_0 -> strings.reportIdForce0
-                            }
-                            Surface(
-                                onClick = { relayManager.setReportIdMode(mode) },
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected) Cyan400.copy(alpha = 0.15f) else Color.Transparent,
-                                border = if (isSelected) BorderStroke(1.dp, Cyan400) else BorderStroke(1.dp, OledBorder),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("report_id_mode_${mode.name}")
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = modeLabel,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (isSelected) Cyan400 else Slate200,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                    if (isSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = strings.cdSelected,
-                                            tint = Cyan400,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
+                    // Section 2: Multi-Language Selector (Foldable)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { isLanguageExpanded = !isLanguageExpanded }
+                            .padding(vertical = 6.dp)
+                            .testTag("btn_toggle_language_section"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = strings.sectionLanguage,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = currentLanguage.displayName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Slate400,
+                                fontSize = 11.sp
+                            )
                         }
+                        Icon(
+                            imageVector = if (isLanguageExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = strings.cdToggleExpand,
+                            tint = Color.White
+                        )
                     }
-
-                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
-
-                    // Section 2: Multi-Language Selector
-                    Text(
-                        text = strings.sectionLanguage,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 6.dp)
-                    )
 
                     val detectedLang = remember { AppLanguage.detectSystemLanguage() }
 
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        AppLanguage.values().forEach { lang ->
-                            val isSelected = currentLanguage == lang
-                            Surface(
-                                onClick = { currentLanguage = lang },
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected) Cyan400.copy(alpha = 0.15f) else Color.Transparent,
-                                border = if (isSelected) BorderStroke(1.dp, Cyan400) else null,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("lang_option_${lang.name}")
-                            ) {
-                                Row(
+                    AnimatedVisibility(visible = isLanguageExpanded) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            AppLanguage.values().forEach { lang ->
+                                val isSelected = currentLanguage == lang
+                                Surface(
+                                    onClick = { currentLanguage = lang },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) Cyan400.copy(alpha = 0.15f) else Color.Transparent,
+                                    border = if (isSelected) BorderStroke(1.dp, Cyan400) else null,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                        .testTag("lang_option_${lang.name}")
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = lang.displayName,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = if (isSelected) Cyan400 else Slate200,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                        )
-                                        Text(
-                                            text = if (lang == AppLanguage.AUTO) {
-                                                "${strings.autoDetectedLabel}: ${detectedLang.displayName}"
-                                            } else {
-                                                lang.subName
-                                            },
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (isSelected) Cyan400.copy(alpha = 0.8f) else Slate400,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                    if (isSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = strings.cdSelected,
-                                            tint = Cyan400,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = lang.displayName,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = if (isSelected) Color.White else Slate200,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                            Text(
+                                                text = if (lang == AppLanguage.AUTO) {
+                                                    "${strings.autoDetectedLabel}: ${detectedLang.displayName}"
+                                                } else {
+                                                    lang.subName
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (isSelected) Slate200 else Slate400,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = strings.cdSelected,
+                                                tint = Cyan400,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-
-                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
-
-                    // Section 3: System Info / OLED Black
-                    Text(
-                        text = strings.sectionAbout,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Slate400,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-                    Text(
-                        text = strings.appVersion,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Slate400,
-                        fontSize = 11.sp
-                    )
                 }
             }
         }
@@ -937,7 +882,8 @@ fun MainScreen(
                 )
             }
         ) { innerPadding ->
-            Box(
+            val anyUpperExpanded = isMouseCardExpanded || isWacomCardExpanded || isStatusExpanded
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(OledBlack)
@@ -946,6 +892,7 @@ fun MainScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .then(if (anyUpperExpanded) Modifier.verticalScroll(rememberScrollState()) else Modifier)
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -1018,6 +965,7 @@ fun MainScreen(
                             activeEvMouseCount = activeEvMice.size,
                             sensitivity = mouseSensitivity,
                             mouseSender = relayManager.mouseSender,
+                            keySender = relayManager.keySender,
                             isExpanded = isMouseCardExpanded,
                             onToggleExpand = { isMouseCardExpanded = !isMouseCardExpanded },
                             onToggleStartStop = {
@@ -1037,6 +985,11 @@ fun MainScreen(
                     }
 
                     // Real-time Terminal Log Console Card (Collapsible; expands to fill remaining bottom area)
+                    val consoleModifier = when {
+                        anyUpperExpanded && isConsoleExpanded -> Modifier.height(220.dp)
+                        anyUpperExpanded -> Modifier
+                        else -> Modifier.weight(1f, fill = isConsoleExpanded)
+                    }
                     TerminalLogsCard(
                         strings = strings,
                         currentLanguage = currentLanguage,
@@ -1051,7 +1004,7 @@ fun MainScreen(
                             clipboard.setPrimaryClip(ClipData.newPlainText("HID Logs", allLogs))
                             Toast.makeText(context, strings.logCopied, Toast.LENGTH_SHORT).show()
                         },
-                        modifier = Modifier.weight(1f, fill = isConsoleExpanded)
+                        modifier = consoleModifier
                     )
                 }
             }
@@ -1116,7 +1069,7 @@ fun MainScreen(
                                         )
                                     }
                                     Icon(
-                                        imageVector = Icons.Default.Bluetooth,
+                                        imageVector = AppIcons.Bluetooth,
                                         contentDescription = strings.cdSelectDevice,
                                         tint = Cyan400
                                     )
@@ -1128,7 +1081,7 @@ fun MainScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showBondedDialog = false }) {
-                    Text(strings.btnOk, color = Cyan400)
+                    Text(strings.btnOk, color = Color.White)
                 }
             }
         )
@@ -1197,7 +1150,7 @@ fun StatusSummaryCard(
                             text = strings.systemStatusTitle,
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
-                            color = Cyan400
+                            color = Color.White
                         )
                         if (!isExpanded) {
                             val summaryText = when (connectionState) {
@@ -1209,7 +1162,7 @@ fun StatusSummaryCard(
                             Text(
                                 text = summaryText,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (connectionState == HidState.CONNECTED) Emerald400 else Slate400,
+                                color = if (connectionState == HidState.CONNECTED) Color.White else Slate400,
                                 fontSize = 11.sp,
                                 maxLines = 1
                             )
@@ -1448,7 +1401,7 @@ fun TargetDeviceCard(
                     Text(
                         text = connectedHost,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Emerald400,
+                        color = Color.White,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1
                     )
@@ -1481,21 +1434,21 @@ fun TargetDeviceCard(
                             .height(48.dp)
                             .testTag("discoverable_button")
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.BluetoothSearching, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(AppIcons.BluetoothSearching, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(strings.btnMakeDiscoverable, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
 
                     OutlinedButton(
                         onClick = onChooseBonded,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Slate200),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                         border = BorderStroke(1.dp, OledBorder),
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp)
                             .testTag("choose_bonded_button")
                     ) {
-                        Icon(Icons.Default.Devices, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(AppIcons.Devices, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(strings.btnBondedList, maxLines = 1)
                     }
@@ -1504,13 +1457,13 @@ fun TargetDeviceCard(
                 if (connectionState == HidState.CONNECTED) {
                     Button(
                         onClick = onDisconnectTarget,
-                        colors = ButtonDefaults.buttonColors(containerColor = Rose500),
+                        colors = ButtonDefaults.buttonColors(containerColor = Rose500, contentColor = Color.White),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
                             .testTag("disconnect_button")
                     ) {
-                        Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(AppIcons.LinkOff, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(strings.btnDisconnect)
                     }
@@ -1559,7 +1512,7 @@ fun SoftKeyboardInputCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.Keyboard,
+                        imageVector = AppIcons.Keyboard,
                         contentDescription = null,
                         tint = Cyan400,
                         modifier = Modifier.size(20.dp)
@@ -1576,7 +1529,7 @@ fun SoftKeyboardInputCard(
                     Text(
                         text = strings.needConnectFirst,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Amber500
+                        color = Slate200
                     )
                 }
             }
@@ -1670,7 +1623,7 @@ fun SoftKeyboardInputCard(
                     .testTag("btn_toggle_soft_keyboard")
             ) {
                 Icon(
-                    imageVector = if (isImeActive) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
+                    imageVector = if (isImeActive) AppIcons.KeyboardHide else AppIcons.Keyboard,
                     contentDescription = null,
                     modifier = Modifier.size(20.dp)
                 )
@@ -1740,7 +1693,7 @@ fun TerminalLogsCard(
                     }
                     Spacer(Modifier.width(6.dp))
                     Icon(
-                        imageVector = Icons.Default.Terminal,
+                        imageVector = AppIcons.Terminal,
                         contentDescription = null,
                         tint = Slate200,
                         modifier = Modifier.size(18.dp)
@@ -1776,7 +1729,7 @@ fun TerminalLogsCard(
                             .testTag("btn_copy_logs")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ContentCopy,
+                            imageVector = AppIcons.ContentCopy,
                             contentDescription = strings.btnCopy,
                             tint = Cyan400,
                             modifier = Modifier.size(18.dp)
@@ -1823,9 +1776,9 @@ fun TerminalLogsCard(
                                 items(logs) { entry ->
                                     val textColor = when (entry.level) {
                                         LogLevel.INFO -> Slate200
-                                        LogLevel.SUCCESS -> Emerald400
-                                        LogLevel.WARN -> Amber500
-                                        LogLevel.ERROR -> Rose500
+                                        LogLevel.SUCCESS -> Color.White
+                                        LogLevel.WARN -> Slate200
+                                        LogLevel.ERROR -> Color.White
                                     }
 
                                     Row(modifier = Modifier.padding(vertical = 1.dp)) {
@@ -1889,7 +1842,7 @@ fun WacomTabletCard(
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Draw,
+                        imageVector = AppIcons.Draw,
                         contentDescription = null,
                         tint = if (wacomState == WacomState.ACTIVE) Emerald400 else Cyan400,
                         modifier = Modifier.size(20.dp)
@@ -1925,7 +1878,7 @@ fun WacomTabletCard(
                             .testTag("btn_toggle_wacom")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Usb,
+                            imageVector = AppIcons.Usb,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp)
                         )
@@ -1961,7 +1914,7 @@ fun WacomTabletCard(
                     Text(
                         text = strings.wacomOrientationLabel,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))
@@ -1982,7 +1935,7 @@ fun WacomTabletCard(
                                 label = { Text(label, fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Cyan400.copy(alpha = 0.2f),
-                                    selectedLabelColor = Cyan300,
+                                    selectedLabelColor = Color.White,
                                     labelColor = Slate200
                                 ),
                                 modifier = Modifier.testTag("wacom_orient_${orient.name}")
@@ -1996,7 +1949,7 @@ fun WacomTabletCard(
                     Text(
                         text = strings.wacomPressureLabel,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))
@@ -2015,7 +1968,7 @@ fun WacomTabletCard(
                                 label = { Text(label, fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Cyan400.copy(alpha = 0.2f),
-                                    selectedLabelColor = Cyan300,
+                                    selectedLabelColor = Color.White,
                                     labelColor = Slate200
                                 ),
                                 modifier = Modifier.testTag("wacom_pressure_${curve.name}")
@@ -2029,7 +1982,7 @@ fun WacomTabletCard(
                     Text(
                         text = strings.wacomButtonModeLabel,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))
@@ -2048,7 +2001,7 @@ fun WacomTabletCard(
                                 label = { Text(label, fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Cyan400.copy(alpha = 0.2f),
-                                    selectedLabelColor = Cyan300,
+                                    selectedLabelColor = Color.White,
                                     labelColor = Slate200
                                 ),
                                 modifier = Modifier.testTag("wacom_btn_mode_${mode.name}")
@@ -2090,7 +2043,7 @@ private fun WacomTelemetryText(
     Text(
         text = subtitleText,
         style = MaterialTheme.typography.bodySmall,
-        color = if (wacomState == WacomState.ACTIVE) Emerald400 else Slate400,
+        color = if (wacomState == WacomState.ACTIVE) Color.White else Slate400,
         fontFamily = if (showTelemetry) FontFamily.Monospace else FontFamily.Default,
         fontSize = 11.sp,
         maxLines = 1
@@ -2107,6 +2060,7 @@ fun MouseTouchpadCard(
     activeEvMouseCount: Int,
     sensitivity: Float,
     mouseSender: HidMouseSender,
+    keySender: HidKeySender,
     isExpanded: Boolean,
     onToggleExpand: () -> Unit,
     onToggleStartStop: () -> Unit,
@@ -2136,7 +2090,7 @@ fun MouseTouchpadCard(
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Mouse,
+                        imageVector = AppIcons.Mouse,
                         contentDescription = null,
                         tint = if (totalMice > 0 || isPointerCaptured) Emerald400 else Cyan400,
                         modifier = Modifier.size(20.dp)
@@ -2173,7 +2127,7 @@ fun MouseTouchpadCard(
                             .testTag("btn_toggle_mouse")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Usb,
+                            imageVector = AppIcons.Usb,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp)
                         )
@@ -2209,7 +2163,7 @@ fun MouseTouchpadCard(
                     Text(
                         text = strings.mouseSensitivityLabel,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Cyan400,
+                        color = Color.White,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))
@@ -2225,7 +2179,7 @@ fun MouseTouchpadCard(
                                 label = { Text("${scale}x", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Cyan400.copy(alpha = 0.2f),
-                                    selectedLabelColor = Cyan300,
+                                    selectedLabelColor = Color.White,
                                     labelColor = Slate200
                                 ),
                                 modifier = Modifier.testTag("mouse_sens_${scale}")
@@ -2253,14 +2207,14 @@ fun MouseTouchpadCard(
                             enabled = isConnected,
                             border = BorderStroke(1.dp, if (isPointerCaptured) Emerald500 else OledBorder),
                             colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = if (isPointerCaptured) Emerald400 else Cyan400
+                                contentColor = Color.White
                             ),
                             modifier = Modifier
                                 .height(48.dp)
                                 .testTag("btn_capture_pointer")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.TouchApp,
+                                imageVector = AppIcons.TouchApp,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -2275,11 +2229,11 @@ fun MouseTouchpadCard(
 
                     Spacer(Modifier.height(8.dp))
 
-                    // Touchpad & Pointer Capture surface
+                    // Touchpad & Pointer Capture surface (expanded height for larger touch area)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(148.dp)
+                            .height(240.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(OledBlack)
                             .border(
@@ -2421,7 +2375,7 @@ fun MouseTouchpadCard(
                         Text(
                             text = if (isPointerCaptured) strings.mouseReleaseBtn else strings.mouseTouchpadHint,
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (isPointerCaptured) Emerald400 else Slate400,
+                            color = if (isPointerCaptured) Color.White else Slate400,
                             fontSize = 11.sp,
                             modifier = Modifier
                                 .align(Alignment.Center)
@@ -2431,24 +2385,24 @@ fun MouseTouchpadCard(
 
                     Spacer(Modifier.height(8.dp))
 
-                    // Tactile Left / Middle / Right Mouse Buttons (min height 48.dp)
+                    // Tactile Mouse & Page Up/Down Bar: [Left] [PgUp] [Middle] [PgDn] [Right]
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        val mouseButtons = listOf(
-                            Triple(0x01, strings.mouseBtnLeft, "btn_mouse_left"),
-                            Triple(0x04, strings.mouseBtnMiddle, "btn_mouse_middle"),
-                            Triple(0x02, strings.mouseBtnRight, "btn_mouse_right")
-                        )
-                        mouseButtons.forEach { (bit, label, tag) ->
+                        @Composable
+                        fun MouseBarButton(
+                            bit: Int,
+                            label: String,
+                            tag: String,
+                            modifier: Modifier = Modifier
+                        ) {
                             var isHeld by remember { mutableStateOf(false) }
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = if (isHeld) Cyan400.copy(alpha = 0.25f) else OledSurfaceVariant,
                                 border = BorderStroke(1.dp, if (isHeld) Cyan400 else OledBorder),
-                                modifier = Modifier
-                                    .weight(1f)
+                                modifier = modifier
                                     .height(48.dp)
                                     .testTag(tag)
                                     .pointerInput(bit) {
@@ -2463,16 +2417,114 @@ fun MouseTouchpadCard(
                                         )
                                     }
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                ) {
                                     Text(
                                         text = label,
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = if (isHeld) Cyan300 else Slate100
+                                        color = if (isHeld) Color.White else Slate100,
+                                        fontSize = 11.sp,
+                                        maxLines = 1
                                     )
                                 }
                             }
                         }
+
+                        @Composable
+                        fun PageNavButton(
+                            isUp: Boolean,
+                            tag: String,
+                            modifier: Modifier = Modifier
+                        ) {
+                            var isHeld by remember { mutableStateOf(false) }
+                            val hidKeyCode = if (isUp) 0x4B.toByte() else 0x4E.toByte() // Page Up / Page Down
+                            val sourceId = if (isUp) "fg_touchpad_page_up" else "fg_touchpad_page_down"
+                            val desc = if (isUp) "Page Up" else "Page Down"
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isHeld) Cyan400.copy(alpha = 0.25f) else OledSurfaceVariant,
+                                border = BorderStroke(1.dp, if (isHeld) Cyan400 else OledBorder),
+                                modifier = modifier
+                                    .height(48.dp)
+                                    .testTag(tag)
+                                    .pointerInput(isUp) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                isHeld = true
+                                                if (keySender.keyEnabled) {
+                                                    keySender.updateSourceKeys(sourceId, 0, setOf(hidKeyCode))
+                                                } else {
+                                                    mouseSender.sendRelativeMove(
+                                                        "fg_touchpad_btn",
+                                                        null,
+                                                        0,
+                                                        0,
+                                                        if (isUp) 5 else -5
+                                                    )
+                                                }
+                                                tryAwaitRelease()
+                                                isHeld = false
+                                                if (keySender.keyEnabled) {
+                                                    keySender.updateSourceKeys(sourceId, 0, emptySet())
+                                                }
+                                            }
+                                        )
+                                    }
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isUp) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        contentDescription = desc,
+                                        tint = if (isHeld) Color.White else Slate100,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = if (isUp) "PgUp" else "PgDn",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isHeld) Color.White else Slate200,
+                                        fontSize = 9.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+
+                        MouseBarButton(
+                            bit = 0x01,
+                            label = strings.mouseBtnLeft,
+                            tag = "btn_mouse_left",
+                            modifier = Modifier.weight(1.1f)
+                        )
+                        PageNavButton(
+                            isUp = true,
+                            tag = "btn_mouse_page_up",
+                            modifier = Modifier.weight(0.95f)
+                        )
+                        MouseBarButton(
+                            bit = 0x04,
+                            label = strings.mouseBtnMiddle,
+                            tag = "btn_mouse_middle",
+                            modifier = Modifier.weight(1.0f)
+                        )
+                        PageNavButton(
+                            isUp = false,
+                            tag = "btn_mouse_page_down",
+                            modifier = Modifier.weight(0.95f)
+                        )
+                        MouseBarButton(
+                            bit = 0x02,
+                            label = strings.mouseBtnRight,
+                            tag = "btn_mouse_right",
+                            modifier = Modifier.weight(1.1f)
+                        )
                     }
                 }
             }
@@ -2507,7 +2559,7 @@ private fun MouseTelemetryText(
     Text(
         text = subtitleText,
         style = MaterialTheme.typography.bodySmall,
-        color = if (totalActive > 0 || mouseState == MouseRelayState.ACTIVE) Emerald400 else Slate400,
+        color = if (totalActive > 0 || mouseState == MouseRelayState.ACTIVE) Color.White else Slate400,
         fontFamily = if (sample != null) FontFamily.Monospace else FontFamily.Default,
         fontSize = 11.sp,
         maxLines = 1
