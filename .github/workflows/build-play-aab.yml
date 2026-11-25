@@ -13,6 +13,8 @@ jobs:
   build-aab:
     name: Test & Build Signed Release AAB
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -41,10 +43,16 @@ jobs:
           UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
           if [ -z "$UPLOAD_KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
             echo "::error::Missing Play upload signing secrets. Configure UPLOAD_KEYSTORE_BASE64, STORE_PASSWORD, and KEY_PASSWORD (key alias 'upload') in GitHub Repository Secrets."
             exit 1
+          fi
+          if [ -n "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "has_play_json=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_play_json=false" >> "$GITHUB_OUTPUT"
           fi
           KEYSTORE_FILE="${RUNNER_TEMP}/my-upload-key.jks"
           printf '%s' "$UPLOAD_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > "$KEYSTORE_FILE"
@@ -66,7 +74,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload to Google Play Console (optional internal draft)
-        if: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        if: steps.keystore.outputs.has_play_json == 'true'
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
