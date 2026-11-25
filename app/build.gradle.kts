@@ -65,9 +65,6 @@ android {
     buildConfig = true
   }
   packaging {
-    jniLibs {
-      useLegacyPackaging = true
-    }
     resources {
       excludes += setOf(
         "META-INF/LICENSE*",
@@ -75,11 +72,6 @@ android {
         "META-INF/DEPENDENCIES",
         "META-INF/*.txt"
       )
-    }
-  }
-  externalNativeBuild {
-    cmake {
-      path = file("src/main/cpp/CMakeLists.txt")
     }
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }

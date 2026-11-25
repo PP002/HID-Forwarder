@@ -64,13 +64,13 @@ class HidForwardingTest {
         val entry = LogEntry(
             timestamp = "12:00:00.000",
             level = LogLevel.INFO,
-            message = "Starting USB keyboard exclusive forwarder (evgrab)...",
-            key = LogKey.EVGRAB_STARTING,
-            args = emptyList()
+            message = "[USB Foreground] Detected external keyboard (USB Keyboard), forwarding keys to target",
+            key = LogKey.USB_FG_DETECTED,
+            args = listOf("USB Keyboard")
         )
-        assertEquals("Starting USB keyboard exclusive forwarder (evgrab)...", entry.resolve(AppLanguage.EN))
-        assertEquals("正在啟動 USB 鍵盤獨占轉發 (evgrab)...", entry.resolve(AppLanguage.ZH_TW))
-        assertEquals("USB キーボード排他転送 (evgrab) を開始中...", entry.resolve(AppLanguage.JA))
+        assertEquals("[USB Foreground] Detected external keyboard (USB Keyboard), forwarding keys to target", entry.resolve(AppLanguage.EN))
+        assertEquals("[USB 前景模式] 已偵測外接鍵盤 (USB Keyboard)，正在轉送按鍵至目標", entry.resolve(AppLanguage.ZH_TW))
+        assertEquals("[USB フォアグラウンド] 外部キーボード検出 (USB Keyboard)、キー転送中", entry.resolve(AppLanguage.JA))
 
         val stateEntry = LogEntry(
             timestamp = "12:00:01.000",
@@ -89,7 +89,7 @@ class HidForwardingTest {
             for (lang in AppLanguage.values()) {
             val s = StringProvider.get(lang)
             org.junit.Assert.assertTrue("appTitle blank for $lang", s.appTitle.isNotBlank())
-            org.junit.Assert.assertTrue("sectionEvgrab blank for $lang", s.sectionEvgrab.isNotBlank())
+            org.junit.Assert.assertTrue("chipUsbKbForeground blank for $lang", s.chipUsbKbForeground.isNotBlank())
             org.junit.Assert.assertTrue("reportIdAuto blank for $lang", s.reportIdAuto.isNotBlank())
             org.junit.Assert.assertTrue("softKeyboardHint blank for $lang", s.softKeyboardHint.isNotBlank())
             org.junit.Assert.assertTrue("notifDefault blank for $lang", s.notifDefault.isNotBlank())

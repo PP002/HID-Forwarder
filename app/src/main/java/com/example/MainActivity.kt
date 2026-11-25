@@ -108,7 +108,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.ui.theme.Amber500
-import com.example.ui.theme.Cyan300
 import com.example.ui.theme.Cyan400
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Emerald500
@@ -133,13 +132,13 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private var relayManagerInstance: RelayManager? = null
-        private var evgrabManagerInstance: EvgrabManager? = null
+        private var usbKeyboardManagerInstance: UsbKeyboardManager? = null
         private var wacomManagerInstance: WacomUsbManager? = null
         private var mouseManagerInstance: MouseUsbManager? = null
     }
 
     private lateinit var relayManager: RelayManager
-    private lateinit var evgrabManager: EvgrabManager
+    private lateinit var usbKeyboardManager: UsbKeyboardManager
     private lateinit var wacomManager: WacomUsbManager
     private lateinit var mouseManager: MouseUsbManager
 
@@ -155,14 +154,13 @@ class MainActivity : ComponentActivity() {
             relayManagerInstance = it
         }
 
-        evgrabManager = evgrabManagerInstance ?: EvgrabManager(
+        usbKeyboardManager = usbKeyboardManagerInstance ?: UsbKeyboardManager(
             applicationContext,
             relayManager.keySender,
-            relayManager.mouseSender,
             log = { msg, lvl -> relayManager.log(msg, lvl) },
             logKey = { key, lvl, args -> relayManager.log(key, lvl, *args) }
         ).also {
-            evgrabManagerInstance = it
+            usbKeyboardManagerInstance = it
         }
 
         wacomManager = wacomManagerInstance ?: WacomUsbManager(
@@ -188,7 +186,7 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 MainScreen(
                     relayManager = relayManager,
-                    evgrabManager = evgrabManager,
+                    usbKeyboardManager = usbKeyboardManager,
                     wacomManager = wacomManager,
                     mouseManager = mouseManager
                 )
@@ -199,8 +197,8 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (::relayManager.isInitialized &&
             relayManager.connectionState.value == HidState.CONNECTED &&
-            ::evgrabManager.isInitialized &&
-            evgrabManager.onForegroundHardwareKeyEvent(event)
+            ::usbKeyboardManager.isInitialized &&
+            usbKeyboardManager.onForegroundHardwareKeyEvent(event)
         ) {
             return true
         }
@@ -223,8 +221,8 @@ class MainActivity : ComponentActivity() {
         if (::mouseManager.isInitialized) {
             mouseManager.refreshAttachedDevices()
         }
-        if (::evgrabManager.isInitialized) {
-            evgrabManager.kickRescan()
+        if (::usbKeyboardManager.isInitialized) {
+            usbKeyboardManager.refreshAttachedKeyboards()
         }
         if (hasBluetoothPermissions() && ::relayManager.isInitialized) {
             HidRelayForegroundService.start(
@@ -239,8 +237,8 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) {
-            if (::evgrabManager.isInitialized) {
-                evgrabManager.clearForegroundKeys()
+            if (::usbKeyboardManager.isInitialized) {
+                usbKeyboardManager.clearForegroundKeys()
             }
             if (::relayManager.isInitialized) {
                 relayManager.keySender.removeSource("fg_touchpad_page_up")
@@ -255,8 +253,8 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         // Do NOT destroy connection or processes on configuration change (e.g. rotation or USB plug/unplug)
         if (!isChangingConfigurations && isFinishing) {
-            if (::evgrabManager.isInitialized) {
-                evgrabManager.stop()
+            if (::usbKeyboardManager.isInitialized) {
+                usbKeyboardManager.destroy()
             }
             if (::wacomManager.isInitialized) {
                 wacomManager.destroy()
@@ -268,7 +266,7 @@ class MainActivity : ComponentActivity() {
             if (::relayManager.isInitialized) {
                 relayManager.cleanup()
             }
-            evgrabManagerInstance = null
+            usbKeyboardManagerInstance = null
             wacomManagerInstance = null
             mouseManagerInstance = null
             relayManagerInstance = null
@@ -289,7 +287,7 @@ private fun hasAllBluetoothPermissions(context: Context): Boolean {
 @Composable
 fun MainScreen(
     relayManager: RelayManager,
-    evgrabManager: EvgrabManager,
+    usbKeyboardManager: UsbKeyboardManager,
     wacomManager: WacomUsbManager,
     mouseManager: MouseUsbManager
 ) {
@@ -310,10 +308,8 @@ fun MainScreen(
     val hidProfileMode by relayManager.hidProfileMode.collectAsState()
     val logs by relayManager.logs.collectAsState()
 
-    // Observe EvgrabManager state
-    val evgrabState by evgrabManager.state.collectAsState()
-    val activeKeyboards by evgrabManager.activeKeyboards.collectAsState()
-    val activeEvMice by evgrabManager.activeEvMice.collectAsState()
+    // Observe non-root foreground UsbKeyboardManager state
+    val activeKeyboards by usbKeyboardManager.activeKeyboards.collectAsState()
 
     // Observe WacomUsbManager state
     val wacomState by wacomManager.state.collectAsState()
@@ -327,7 +323,7 @@ fun MainScreen(
     val activeUsbMice by mouseManager.activeMice.collectAsState()
     val mouseSensitivity by mouseManager.sensitivity.collectAsState()
 
-    val combinedMouseCount = activeUsbMice.size + activeEvMice.size
+    val activeMouseCount = activeUsbMice.size
 
     var showBondedDialog by remember { mutableStateOf(false) }
     var permissionsGranted by remember { mutableStateOf(false) }
@@ -442,80 +438,6 @@ fun MainScreen(
 
                     HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 8.dp))
 
-                    // Section 1: USB Keyboard Exclusive Grab (evgrab)
-                    Text(
-                        text = strings.sectionEvgrab,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 6.dp)
-                    )
-
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = OledSurfaceVariant),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, OledBorder),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("drawer_key_forwarder_card")
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = strings.evgrabTitle,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Slate100
-                                    )
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        text = when (evgrabState) {
-                                            EvgrabState.RUNNING -> {
-                                                val kbText = if (activeKeyboards.isNotEmpty()) {
-                                                    activeKeyboards.joinToString { it.name }
-                                                } else {
-                                                    strings.evgrabSearching
-                                                }
-                                                strings.evgrabRunningFmt.replace("%s", kbText)
-                                            }
-                                            EvgrabState.STOPPED_BY_HOTKEY -> strings.backgroundFwdHotkeyStopped
-                                            EvgrabState.STOPPED -> strings.backgroundFwdInactive
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = when (evgrabState) {
-                                            EvgrabState.RUNNING -> Color.White
-                                            EvgrabState.STOPPED_BY_HOTKEY -> Slate200
-                                            EvgrabState.STOPPED -> Slate400
-                                        },
-                                        fontSize = 11.sp
-                                    )
-                                }
-                                Switch(
-                                    checked = (evgrabState == EvgrabState.RUNNING),
-                                    onCheckedChange = { isChecked ->
-                                        if (isChecked) evgrabManager.start() else evgrabManager.stop()
-                                    },
-                                    modifier = Modifier.testTag("switch_drawer_key_forwarder")
-                                )
-                            }
-
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = strings.evgrabDesc,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Slate400,
-                                fontSize = 10.5.sp
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = OledBorder, modifier = Modifier.padding(vertical = 12.dp))
-
                     // Multi-OTG USB Hub Connected Devices Summary
                     Text(
                         text = strings.sectionOtgHub,
@@ -538,17 +460,16 @@ fun MainScreen(
                                 text = String.format(
                                     strings.otgSummaryFmt,
                                     activeKeyboards.size,
-                                    combinedMouseCount,
+                                    activeMouseCount,
                                     wacomCount
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (activeKeyboards.isNotEmpty() || combinedMouseCount > 0 || wacomCount > 0) Color.White else Slate400
+                                color = if (activeKeyboards.isNotEmpty() || activeMouseCount > 0 || wacomCount > 0) Color.White else Slate400
                             )
                             val hubNames = buildList {
                                 activeKeyboards.forEach { add("KB: ${it.name}") }
                                 activeUsbMice.forEach { add("Mouse: ${it.name}") }
-                                activeEvMice.forEach { add("EvMouse: ${it.name}") }
                                 wacomModel?.let { add("Pen: ${it.modelName}") }
                             }
                             if (hubNames.isNotEmpty()) {
@@ -600,14 +521,14 @@ fun MainScreen(
                                     Spacer(Modifier.height(2.dp))
                                     Text(
                                         text = when {
-                                            combinedMouseCount > 0 -> strings.mouseActiveChipFmt.replace("%d", combinedMouseCount.toString())
+                                            activeMouseCount > 0 -> strings.mouseActiveChipFmt.replace("%d", activeMouseCount.toString())
                                             mouseState == MouseRelayState.WAITING_FOR_DEVICE -> strings.mouseWaitingChip
                                             mouseState == MouseRelayState.REQUESTING_PERMISSION -> strings.mousePermChip
                                             else -> strings.mouseNoneConnected
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = when {
-                                            combinedMouseCount > 0 || mouseState == MouseRelayState.ACTIVE -> Color.White
+                                            activeMouseCount > 0 || mouseState == MouseRelayState.ACTIVE -> Color.White
                                             mouseState == MouseRelayState.WAITING_FOR_DEVICE || mouseState == MouseRelayState.REQUESTING_PERMISSION -> Slate200
                                             else -> Slate400
                                         },
@@ -907,15 +828,11 @@ fun MainScreen(
                         isSocketListening = isSocketListening,
                         isClientConnected = isClientConnected,
                         packetsFlow = relayManager.packetsForwarded,
-                        evgrabState = evgrabState,
                         activeKeyboards = activeKeyboards,
                         wacomState = wacomState,
                         wacomModel = wacomModel,
                         mouseState = mouseState,
-                        activeMouseCount = combinedMouseCount,
-                        onToggleEvgrab = {
-                            if (evgrabState == EvgrabState.RUNNING) evgrabManager.stop() else evgrabManager.start()
-                        },
+                        activeMouseCount = activeMouseCount,
                         onToggleWacom = {
                             if (wacomState == WacomState.STOPPED) wacomManager.start() else wacomManager.stop()
                         },
@@ -962,7 +879,6 @@ fun MainScreen(
                             isConnected = (connectionState == HidState.CONNECTED),
                             mouseState = mouseState,
                             activeUsbMice = activeUsbMice,
-                            activeEvMouseCount = activeEvMice.size,
                             sensitivity = mouseSensitivity,
                             mouseSender = relayManager.mouseSender,
                             keySender = relayManager.keySender,
@@ -1100,13 +1016,11 @@ fun StatusSummaryCard(
     isSocketListening: Boolean,
     isClientConnected: Boolean,
     packetsFlow: StateFlow<Long>,
-    evgrabState: EvgrabState,
-    activeKeyboards: List<DiscoveredKeyboard>,
+    activeKeyboards: List<ConnectedUsbKeyboard>,
     wacomState: WacomState,
     wacomModel: WacomModelSpec?,
     mouseState: MouseRelayState,
     activeMouseCount: Int,
-    onToggleEvgrab: () -> Unit,
     onToggleWacom: () -> Unit,
     onToggleMouse: () -> Unit
 ) {
@@ -1236,14 +1150,14 @@ fun StatusSummaryCard(
                             modifier = Modifier.testTag("chip_connection_status")
                         )
 
-                        // evgrab USB Grab Status Chip (clickable to toggle USB forwarding)
+                        // Foreground USB Keyboard Status Chip (non-root Android InputManager)
                         AssistChip(
-                            onClick = onToggleEvgrab,
+                            onClick = {},
                             label = {
-                                val text = when (evgrabState) {
-                                    EvgrabState.RUNNING -> strings.chipEvgrabRunningFmt.replace("%d", activeKeyboards.size.toString())
-                                    EvgrabState.STOPPED_BY_HOTKEY -> strings.chipEvgrabHotkeyStopped
-                                    EvgrabState.STOPPED -> strings.chipEvgrabForeground
+                                val text = if (activeKeyboards.isNotEmpty()) {
+                                    "${strings.chipUsbKbForeground} (${activeKeyboards.size})"
+                                } else {
+                                    strings.chipUsbKbForeground
                                 }
                                 Text(text, color = Slate100)
                             },
@@ -1252,13 +1166,7 @@ fun StatusSummaryCard(
                                     modifier = Modifier
                                         .size(8.dp)
                                         .clip(CircleShape)
-                                        .background(
-                                            when (evgrabState) {
-                                                EvgrabState.RUNNING -> Emerald500
-                                                EvgrabState.STOPPED_BY_HOTKEY -> Amber500
-                                                EvgrabState.STOPPED -> Cyan400
-                                            }
-                                        )
+                                        .background(if (activeKeyboards.isNotEmpty()) Emerald500 else Cyan400)
                                 )
                             },
                             colors = AssistChipDefaults.assistChipColors(containerColor = OledSurfaceVariant),
@@ -2057,7 +1965,6 @@ fun MouseTouchpadCard(
     isConnected: Boolean,
     mouseState: MouseRelayState,
     activeUsbMice: List<ConnectedUsbMouse>,
-    activeEvMouseCount: Int,
     sensitivity: Float,
     mouseSender: HidMouseSender,
     keySender: HidKeySender,
@@ -2067,7 +1974,7 @@ fun MouseTouchpadCard(
     onSensitivityChange: (Float) -> Unit
 ) {
     val isRunning = mouseState != MouseRelayState.STOPPED
-    val totalMice = activeUsbMice.size + activeEvMouseCount
+    val totalMice = activeUsbMice.size
     var isPointerCaptured by remember { mutableStateOf(false) }
     var captureSurfaceView by remember { mutableStateOf<View?>(null) }
 
@@ -2107,7 +2014,6 @@ fun MouseTouchpadCard(
                             strings = strings,
                             mouseState = mouseState,
                             activeUsbMice = activeUsbMice,
-                            activeEvMouseCount = activeEvMouseCount,
                             telemetryFlow = mouseSender.liveTelemetry
                         )
                     }
@@ -2537,11 +2443,10 @@ private fun MouseTelemetryText(
     strings: LocalizedStrings,
     mouseState: MouseRelayState,
     activeUsbMice: List<ConnectedUsbMouse>,
-    activeEvMouseCount: Int,
     telemetryFlow: StateFlow<MouseTelemetrySample?>
 ) {
     val sample by telemetryFlow.collectAsState()
-    val totalActive = activeUsbMice.size + activeEvMouseCount
+    val totalActive = activeUsbMice.size
     val subtitleText = when {
         sample != null && (totalActive > 0 || mouseState != MouseRelayState.STOPPED) -> {
             val s = sample!!
@@ -2553,7 +2458,6 @@ private fun MouseTelemetryText(
             )
         }
         activeUsbMice.isNotEmpty() -> activeUsbMice.joinToString { it.name }
-        activeEvMouseCount > 0 -> strings.mouseActiveChipFmt.replace("%d", activeEvMouseCount.toString())
         else -> strings.mouseNoneConnected
     }
     Text(

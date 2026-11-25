@@ -18,7 +18,6 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeoutException
@@ -352,35 +351,6 @@ class MouseUsbManager(
         mgr.requestPermission(nextDev, pending)
     }
 
-    private fun trySysfsUnbindInterfaceViaRoot(vendorId: Int, productId: Int, interfaceNumber: Int) {
-        try {
-            if (!File("/sys/bus/usb/devices").exists()) return
-            val vidHex = "%04x".format(vendorId)
-            val pidHex = "%04x".format(productId)
-            val intfHex = "%02x".format(interfaceNumber)
-            val script = """
-                for d in /sys/bus/usb/devices/*; do
-                  [ -f "${'$'}d/idVendor" ] || continue
-                  v=${'$'}(cat "${'$'}d/idVendor" 2>/dev/null)
-                  p=${'$'}(cat "${'$'}d/idProduct" 2>/dev/null)
-                  if [ "${'$'}v" = "$vidHex" ] && [ "${'$'}p" = "$pidHex" ]; then
-                    base=${'$'}(basename "${'$'}d")
-                    for intf in "${'$'}d/${'$'}base":*; do
-                      bnum=${'$'}(cat "${'$'}intf/bInterfaceNumber" 2>/dev/null)
-                      if [ "${'$'}bnum" = "$intfHex" ] && [ -L "${'$'}intf/driver" ]; then
-                        drv=${'$'}(basename "${'$'}(readlink "${'$'}intf/driver")")
-                        if [ "${'$'}drv" = "usbhid" ]; then
-                          echo "${'$'}(basename "${'$'}intf")" > /sys/bus/usb/drivers/usbhid/unbind 2>/dev/null
-                        fi
-                      fi
-                    done
-                  fi
-                done
-            """.trimIndent()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", script)).waitFor()
-        } catch (_: Exception) {}
-    }
-
     private fun fetchMouseLayoutFromDescriptor(
         conn: UsbDeviceConnection,
         intf: UsbInterface
@@ -418,11 +388,7 @@ class MouseUsbManager(
         var selectedLayout: HidMouseReportLayout? = null
 
         for ((intf, ep) in candidates) {
-            var claimed = conn.claimInterface(intf, true)
-            if (!claimed) {
-                trySysfsUnbindInterfaceViaRoot(device.vendorId, device.productId, intf.id)
-                claimed = conn.claimInterface(intf, true)
-            }
+            val claimed = conn.claimInterface(intf, true)
             if (!claimed) continue
 
             val parsedLayout = fetchMouseLayoutFromDescriptor(conn, intf)

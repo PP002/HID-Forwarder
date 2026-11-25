@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -280,31 +279,6 @@ class WacomUsbManager(
         return null
     }
 
-    private fun trySysfsUnbindWacomViaRoot() {
-        try {
-            val usbDevicesDir = File("/sys/bus/usb/devices")
-            if (!usbDevicesDir.exists()) return
-            val script = """
-                for d in /sys/bus/usb/devices/*; do
-                  [ -f "${'$'}d/idVendor" ] || continue
-                  v=${'$'}(cat "${'$'}d/idVendor" 2>/dev/null)
-                  if [ "${'$'}v" = "056a" ]; then
-                    base=${'$'}(basename "${'$'}d")
-                    for intf in "${'$'}d/${'$'}base":*; do
-                      if [ -L "${'$'}intf/driver" ]; then
-                        drv=${'$'}(basename "${'$'}(readlink "${'$'}intf/driver")")
-                        if [ "${'$'}drv" = "usbhid" ]; then
-                          echo "${'$'}(basename "${'$'}intf")" > /sys/bus/usb/drivers/usbhid/unbind 2>/dev/null
-                        fi
-                      fi
-                    done
-                  fi
-                done
-            """.trimIndent()
-            Runtime.getRuntime().exec(arrayOf("su", "-c", script)).waitFor()
-        } catch (_: Exception) {}
-    }
-
     private fun openAndStartReader(device: UsbDevice) {
         val mgr = usbManager ?: return
         stopReaderOnly()
@@ -328,11 +302,7 @@ class WacomUsbManager(
             return
         }
 
-        var claimed = conn.claimInterface(intf, true)
-        if (!claimed) {
-            trySysfsUnbindWacomViaRoot()
-            claimed = conn.claimInterface(intf, true)
-        }
+        val claimed = conn.claimInterface(intf, true)
         if (!claimed) {
             conn.close()
             emitLog(LogKey.WACOM_CLAIM_FAILED, LogLevel.ERROR, intf.id)

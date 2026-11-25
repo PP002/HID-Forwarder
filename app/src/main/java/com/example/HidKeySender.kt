@@ -184,7 +184,7 @@ class HidKeySender(
     }
 
     /**
-     * Updates source state directly from an 8-byte boot keyboard report [modifier, 0, key1..key6] (used by evgrab).
+     * Updates source state directly from an 8-byte boot keyboard report [modifier, 0, key1..key6] (used by local TCP relay client).
      */
     fun sendRawReport(source: KeySource, report8: ByteArray) {
         sendRawReport(source.name, report8)

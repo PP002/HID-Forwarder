@@ -1,79 +1,65 @@
 # HID Forwarder (USB OTG → Bluetooth HID Relay)
 
-An Android Jetpack Compose utility that turns your Android phone into a **Bluetooth HID peripheral relay**—forwarding **USB OTG keyboards, USB OTG mice, and Wacom drawing tablets** (plus an on-screen QWERTY soft keyboard and Touchpad) wirelessly to any Bluetooth host such as a PC, Mac, Linux machine, tablet, e-reader (Kindle), or another phone.
+An Android Jetpack Compose utility that turns your Android phone into a **Bluetooth HID peripheral relay**—forwarding **USB OTG keyboards, USB OTG mice, and Wacom drawing tablets** (plus an on-screen QWERTY soft keyboard and Touchpad) wirelessly to any Bluetooth host such as a PC, Mac, Linux machine, tablet, e-reader, or another phone.
+
+The Android app in `app/` is **100% non-root and Google Play Store compliant** (zero `su` calls, zero native PIE binaries). Optional root-level `EVIOCGRAB` helpers are separated into `/root-helper/` for advanced ADB/root setups over the app's local TCP relay (`127.0.0.1:9876`).
 
 ---
 
 ## Core Features
 
 ### 1. Multi-OTG USB Hub Concurrency
-Plug a powered or passive **USB OTG Hub** into your Android phone to connect **multiple USB input devices simultaneously** (e.g., multiple keyboards + multiple mice + a Wacom tablet):
-- Hotplug supervisor discovers newly attached or detached devices independently—unplugging one keyboard or mouse releases only that device's state without interrupting other connected devices.
-- Per-source modifier, key-rollover, and mouse-button states are OR-merged cleanly before transmission so multiple keyboards/mice work seamlessly together.
-- Sibling-safe USB interface handling ensures unified wireless dongles (e.g., keyboard + mouse combo receivers) keep both their keyboard interface and mouse interface working without tearing each other down.
+Plug a powered or passive **USB OTG Hub** into your Android phone to connect **multiple USB input devices simultaneously** (e.g., keyboards + mice + a Wacom tablet):
+- Hotplug supervisor discovers newly attached or detached devices independently—unplugging one device releases only its own state without interrupting others.
+- Per-source modifier, key-rollover, and mouse-button states are OR-merged cleanly before transmission.
+- Sibling-safe USB interface handling ensures unified wireless dongles keep keyboard and mouse interfaces working together.
 
 ### 2. USB OTG & Screen Keyboard → Bluetooth Keyboard (Report ID `1`)
-- **Root Exclusive Grab (`libevgrab.so` / `EVIOCGRAB`)**: Captures all external USB keyboards (`EV_KEY + EV_REP`) exclusively at the Linux `/dev/input/event*` layer so keystrokes never trigger input on the phone itself—even in the background or with the screen off.
-  - Press **`Ctrl + Alt + Q`** on any grabbed keyboard to immediately release the keyboard grab.
-- **Non-Root Foreground USB Relay**: Intercepts external hardware `KeyEvent`s per `deviceId` whenever the app is open on non-rooted devices.
+- **Non-Root Foreground USB Relay (`UsbKeyboardManager`)**: Uses Android `InputManager` hotplug detection and forwards external hardware `KeyEvent`s per `deviceId` whenever the app is in foreground.
 - **On-Screen QWERTY Live Relay (`HidTextInputView`)**: Disables phone-side IME composition (`TYPE_NULL`) and forwards raw keycodes over Bluetooth HID so the target host handles its own layout/IME (e.g., CJK, Cangjie, Japanese, dead keys).
-- **Local TCP Socket Relay (`127.0.0.1:9876`)**: Accepts raw 8-byte HID keyboard packets from local helper clients (`[modifier, reserved, k1..k6]`).
+- **Local TCP Socket Relay (`127.0.0.1:9876`)**: Accepts raw 8-byte HID keyboard reports (`[modifier, reserved, k1..k6]`) from external local clients such as `/root-helper/evgrab_relay.sh`.
 
 ### 3. USB OTG Mouse, Wireless Dongle & Touchpad → Bluetooth Mouse (Report ID `3`)
 - **Non-Root Multi-OTG USB Mouse Reader (`MouseUsbManager`)**:
   - Uses Android `UsbManager` HID Interrupt-IN pipelining (`UsbRequest` 4-deep queue + `bulkTransfer` fallback).
-  - Parses standard **Boot Mice** (`subclass=1, protocol=2`) and dynamically decodes **custom HID Report Descriptors** (`GET_DESCRIPTOR 0x2200`) including multi-button mice and 12-bit/16-bit high-DPI gaming mice.
-  - Excludes Wacom tablets (`0x056A`) and Boot Keyboards (`subclass=1, protocol=1`) automatically.
-- **Root Exclusive Mouse Grab (`evgrab --mouse`)**:
-  - Locks `/dev/input/event*` mice exclusively via `EVIOCGRAB` and streams 4-byte reports (`[buttons, dx, dy, wheel]`), preventing a second Android cursor from moving on the phone screen.
+  - Parses standard **Boot Mice** (`subclass=1, protocol=2`) and dynamically decodes **custom HID Report Descriptors** (`GET_DESCRIPTOR 0x2200`).
 - **Built-in Touchpad & Pointer Capture**:
-  - **Touchpad gestures**: 1-finger drag to move cursor, tap for Left Click, 2-finger tap for Right Click, 2-finger vertical drag to scroll, plus tactile Left / Middle / Right hold buttons.
-  - **Pointer Capture (`View.requestPointerCapture()`)**: Unrooted fallback for physical external USB mice using Android's captured `SOURCE_MOUSE_RELATIVE` deltas + configurable sensitivity (`0.5x`, `1.0x`, `1.5x`, `2.5x`).
+  - **Touchpad gestures**: 1-finger drag to move cursor, tap for Left Click, 2-finger tap for Right Click, 2-finger vertical drag to scroll, plus Left / Middle / Right / Page Up / Page Down controls.
+  - **Pointer Capture (`View.requestPointerCapture()`)**: Non-root mouse capture mode using Android's `SOURCE_MOUSE_RELATIVE` deltas + configurable sensitivity (`0.5x`, `1.0x`, `1.5x`, `2.5x`).
 
 ### 4. USB OTG Wacom Drawing Tablet → Bluetooth Digitizer Pen (Report ID `2`)
 - Native Android USB Host support for **Wacom CTL-471 (One / Bamboo)** and compatible Wacom OTG tablets (`0x056A`):
   - Automatically unlocks Wacom native pen mode (`Feature Report 0x02`) over USB control transfer.
-  - Relays X/Y coordinates, tip/hover/eraser flags, barrel buttons, and 16-bit scaled pen pressure at high cadence (~125 Hz coalescing while preserving hover/tip transitions).
-  - Supports **4 board orientations** (`0°`, `270° USB Top`, `90°`, `180°`), **pressure curves** (`Gamma 1.2`, `Linear 1.0`), and **barrel button mapping** (`Stylus Native` vs `Shortcuts`).
+  - Relays X/Y coordinates, tip/hover/eraser flags, barrel buttons, and 16-bit scaled pen pressure.
+  - Supports **4 board orientations** (`0°`, `270° USB Top`, `90°`, `180°`), **pressure curves** (`Gamma 1.2`, `Linear 1.0`), and **barrel button mapping**.
 
 ---
 
-## Bluetooth HID Profiles & Report IDs
+## Optional External Root Helper (`/root-helper/`)
 
-Switch profiles from the navigation drawer (`Menu & Settings`):
-
-| Profile Mode | HID Subclass | Active Report IDs |
-| :--- | :--- | :--- |
-| **Combo (Default)** | Combo / Generic | `ID=1` Keyboard (8B) + `ID=2` Wacom Pen (7B) + `ID=3` Mouse (4B) — 223-byte SDP descriptor |
-| **Keyboard Only** | Boot Keyboard (`0x40`) | `ID=1` (Report Mode) or `ID=0` (Boot / No-ID mode) |
-| **Mouse Only** | Boot Mouse (`0x80`) | `ID=3` (Report Mode) or `ID=0` (Boot / No-ID mode) |
-| **Wacom Pen Only** | Digitizer (`0x00`) | `ID=2` (7-byte absolute pen + pressure) |
-
-- **Report ID Override** (`Auto` / `Force 1` / `Force 0`) is available in the drawer for target hosts that require fixed Report ID framing.
+For background/screen-off exclusive keyboard/mouse capture via Linux `/dev/input/event*` (`EVIOCGRAB`), build and run the standalone C helper located in `/root-helper/` separately from the Android app:
+- `/root-helper/evgrab.c`
+- `/root-helper/evgrab_relay.sh`
+- See `/root-helper/README.md` for NDK/cross-compile and `127.0.0.1:9876` usage instructions.
 
 ---
 
-## Multilingual UI & Live Terminal Console
+## Play Store Release Build via GitHub Actions
 
-- All UI controls, status chips, foreground notifications, and real-time console logs dynamically switch across **10 languages** (`Auto`, `English`, `繁體中文`, `简体中文`, `日本語`, `한국어`, `Español`, `Français`, `Deutsch`, `Русский`, `Português`).
-- Expandable OLED Pure Black terminal console fills the lower screen section for inspecting live Bluetooth HID SDP states, USB OTG attach/detach events, and TX diagnostics.
+The workflow at `.github/workflows/build-play-aab.yml` runs unit tests (`gradle :app:testDebugUnitTest`) and builds a signed Android App Bundle (`:app:bundleRelease`) ready for Google Play Console (`com.benkollo.hidfwd`).
 
----
-
-## Quick Usage
-
-1. Grant Bluetooth (`BLUETOOTH_CONNECT`, `BLUETOOTH_ADVERTISE`) and notification permissions on launch; expand **System Service Status** (or check its header summary) to verify **HID: Ready**.
-2. Tap **Discoverable**, then pair and connect directly from your target computer/device's Bluetooth menu (tap **Paired Devices** to check existing bonded hosts).
-3. Plug your USB OTG keyboard, mouse, Wacom CTL-471, or multi-port USB OTG hub into your phone:
-   - **Keyboards**: Toggle **USB Keyboard Exclusive Grab (evgrab)** (Root) or leave the app open in foreground (Non-Root).
-   - **Mice**: Tap **Start Mouse** (or the Mouse status chip) and grant Android USB Host permission if prompted; or expand **USB Mouse / Touchpad → BT Mouse** to use the Touchpad or **Capture Pointer**.
-   - **Wacom**: Tap **Start Wacom** (or the Wacom status chip) and grant USB Host permission.
+### Required GitHub Repository Secrets
+Configure these in **Settings → Secrets and variables → Actions**:
+1. `UPLOAD_KEYSTORE_BASE64`: Base64-encoded Play upload keystore (with key alias `upload`, e.g. `base64 -w 0 my-upload-key.jks`).
+2. `STORE_PASSWORD`: Keystore password.
+3. `KEY_PASSWORD`: Key password for alias `upload`.
+4. `PLAY_SERVICE_ACCOUNT_JSON` *(optional)*: Google Play Console service account JSON to automatically upload draft bundles to the `internal` track.
 
 ---
 
-## Build & Unit Tests
+## Local Build & Unit Tests
 
-- **Requirements**: Android SDK (minSdk `28`, targetSdk/compileSdk `36`), NDK / CMake (compiles `app/src/main/cpp/evgrab.c` into `libevgrab.so`).
+- **Requirements**: JDK 21, Android SDK (`minSdk 28`, `targetSdk`/`compileSdk 36`), Gradle `9.3.1` (no NDK/CMake required).
 - **Build Debug APK**:
   ```bash
   gradle :app:assembleDebug

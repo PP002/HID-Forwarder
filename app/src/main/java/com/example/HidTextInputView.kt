@@ -378,7 +378,7 @@ class HidTextInputView(
         }
 
         /**
-         * Maps a Linux evdev scanCode directly to a HID Boot Keyboard Usage (matching evgrab.c).
+         * Maps a Linux evdev scanCode directly to a HID Boot Keyboard Usage.
          */
         fun evdevScanCodeToHidUsage(scanCode: Int): Byte {
             return when (scanCode) {
